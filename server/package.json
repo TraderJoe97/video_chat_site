@@ -1,5 +1,6 @@
 {
   "name": "server",
+  "type": "module",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -17,6 +18,7 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.2",
-    "@types/socket.io": "^3.0.1"
+    "@types/socket.io": "^3.0.1",
+    "ts-node": "^10.9.2"
   }
 }
