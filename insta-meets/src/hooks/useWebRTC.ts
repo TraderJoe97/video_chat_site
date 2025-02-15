@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("http://192.168.0.41:5000");
+const socket = io("https://video-chat-backend-pd1m.onrender.com");
 
 export const useWebRTC = () => {
   const [stream, setStream] = useState<MediaStream | null>(null);

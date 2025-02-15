@@ -7,7 +7,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:3000", // Frontend URL
+    origin: "https://insta-meets.netlify.app/", // Frontend URL
     methods: ["GET", "POST"],
   },
 });
