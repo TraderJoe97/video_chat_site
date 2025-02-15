@@ -7,7 +7,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "https://insta-meets.vercel.app/", // Frontend URL
+    origin: "https://insta-meets.vercel.app", // Frontend URL
     methods: ["GET", "POST"],
   },
 });
