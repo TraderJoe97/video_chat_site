@@ -11,7 +11,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'https://insta-meets.vercel.app'
+    origin: process.env.FRONTEND_URL
   })
 );
 
@@ -32,7 +32,7 @@ app.get('/api', (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'https://insta-meets.vercel.app',
+    origin: process.env.FRONTEND_URL,
     methods: ['GET', 'POST']
   }
 });
