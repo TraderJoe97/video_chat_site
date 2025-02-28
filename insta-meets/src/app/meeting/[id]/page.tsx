@@ -120,15 +120,26 @@ export default function MeetingRoom() {
 
         // WebRTC signaling
         socketConnection.on("offer", (data) => {
-          console.log("Received offer from:", data.callerId)
-          const peer = addPeer(data.offer, data.callerId, stream)
-          peersRef.current[data.callerId] = peer
-          
-          setPeers(prevPeers => ({
+          const peer = addPeer(data.offer, data.callerId, localStream);
+          peersRef.current[data.callerId] = peer;
+        
+          setPeers((prevPeers) => ({
             ...prevPeers,
-            [data.callerId]: peer
-          }))
-        })
+            [data.callerId]: peer,
+          }));
+        });
+        
+        socketConnection.on("answer", (data) => {
+          if (peersRef.current[data.callerId]) {
+            peersRef.current[data.callerId].signal(data.answer);
+          }
+        });
+        
+        socketConnection.on("candidate", (data) => {
+          if (peersRef.current[data.callerId]) {
+            peersRef.current[data.callerId].signal(data.candidate);
+          }
+        });
 
         socketConnection.on("answer", (data) => {
           console.log("Received answer from:", data.callerId)
