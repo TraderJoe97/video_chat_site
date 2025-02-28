@@ -15,8 +15,16 @@ export default function Dashboard() {
   const { isAuthenticated, isLoading, loginWithRedirect } = useAuth0()
   const router = useRouter()
   const [meetingId, setMeetingId] = useState("")
-  const [recentMeetings, setRecentMeetings] = useState([])
 
+interface Meeting {
+  id: string;
+  name: string;
+  date: string;
+  participants: number;
+  duration: number;
+}
+
+const [recentMeetings, setRecentMeetings] = useState<Meeting[]>([]);
   useEffect(() => {
     // If not loading and not authenticated, redirect to login
     if (!isLoading && !isAuthenticated) {
