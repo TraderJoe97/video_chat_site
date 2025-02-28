@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react"
 import { useParams, useSearchParams } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
-import { io } from "socket.io-client"
+import { io, Socket } from "socket.io-client"
 import Peer from "simple-peer"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -11,6 +11,7 @@ import { Mic, MicOff, VideoIcon, VideoOff, PhoneOff, MessageSquare, Users, Share
 import { ChatPanel } from "@/components/chat-panel"
 import { ParticipantsPanel } from "@/components/participants-panel"
 import { toast } from "sonner"
+
 
 export default function MeetingRoom() {
   const { id } = useParams()
@@ -21,7 +22,7 @@ export default function MeetingRoom() {
   const [socket, setSocket] = useState(null)
   const [peers, setPeers] = useState({})
   const [streams, setStreams] = useState({})
-  const [localStream, setLocalStream] = useState(null)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [videoEnabled, setVideoEnabled] = useState(true)
   const [showChat, setShowChat] = useState(false)
@@ -33,7 +34,7 @@ export default function MeetingRoom() {
   // Refs
   const localVideoRef = useRef(null)
   const peersRef = useRef({})
-  const socketRef = useRef(null)
+  const socketRef = useRef<Socket | null>(null)
   const userIdRef = useRef(isAuthenticated ? user?.sub : searchParams.get("name") || "Guest")
 
   // Initialize meeting
@@ -57,7 +58,7 @@ export default function MeetingRoom() {
         
         setLocalStream(stream)
         if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream
+          (localVideoRef.current as HTMLMediaElement).srcObject = stream;
         }
 
         // Connect to socket server
@@ -430,4 +431,5 @@ export default function MeetingRoom() {
     </div>
   )
 }
+
 
