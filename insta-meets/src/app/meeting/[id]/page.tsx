@@ -61,7 +61,7 @@ export default function MeetingRoom() {
         }
 
         // Connect to socket server
-        const socketConnection = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000")
+        const socketConnection = io(process.env.BACKEND_URL || "http://localhost:4000")
         socketRef.current = socketConnection
         setSocket(socketConnection)
 
