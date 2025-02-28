@@ -15,7 +15,7 @@ import { toast } from "sonner"
 export default function MeetingRoom() {
   const { id } = useParams()
   const searchParams = useSearchParams()
-  const { user, isAuthenticated, loginWithRedirect } = useAuth0()
+  const { user, isAuthenticated } = useAuth0()
 
   // State
   const [socket, setSocket] = useState(null)
