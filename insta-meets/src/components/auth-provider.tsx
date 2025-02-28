@@ -14,8 +14,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <Auth0Provider
-      domain={process.env.NEXT_PUBLIC_AUTH0_DOMAIN || "dev-q5303arr556nbtzi.jp.auth0.com"}
-      clientId={process.env.NEXT_PUBLIC_AUTH0_CLIENT_ID || "LdFta1zibLwjcB1irJlFDKkvdNUlNUYZ"}
+      domain={process.env.NEXT_PUBLIC_AUTH0_DOMAIN }
+      clientId={process.env.NEXT_PUBLIC_AUTH0_CLIENT_ID}
       authorizationParams={{
         redirect_uri: typeof window !== "undefined" ? window.location.origin : "",
       }}

@@ -172,7 +172,7 @@ export default function MeetingRoom() {
         socketRef.current.disconnect()
       }
     }
-  }, [id, isAuthenticated, localStream, searchParams]), // Added searchParams to dependencies
+  }, [id, isAuthenticated, localStream, searchParams]); // Added searchParams to dependencies
 
   // Create a peer (initiator)\
   const createPeer = (userId, socketId, stream) => {
