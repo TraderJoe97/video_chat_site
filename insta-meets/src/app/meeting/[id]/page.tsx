@@ -46,8 +46,8 @@ interface Streams {
 }
 
 interface Peer {
-  _pc: RTCPeerConnection;
-  signal: (signalData: SignalData) => void;
+  _pc: RTCPeerConnection
+  signal: (signalData: SignalData) => void
 }
 interface ParticipantMap {
   [key: string]: string
@@ -237,6 +237,17 @@ export default function MeetingRoom() {
   }, [id, isAuthenticated, searchParams, localStream])
 
   useEffect(() => {
+    console.log("Streams updated:", Object.keys(streams).length)
+    Object.entries(streams).forEach(([userId, stream]) => {
+      console.log(
+        `Stream for ${userId}:`,
+        stream.id,
+        stream.getTracks().map((t) => `${t.kind}:${t.enabled}`),
+      )
+    })
+  }, [streams])
+
+  useEffect(() => {
     // Debug logging for streams
     if (Object.keys(streams).length > 0) {
       console.log("Current streams:", Object.keys(streams))
@@ -263,17 +274,16 @@ export default function MeetingRoom() {
     }
   }, [connectionQuality, audioOnlyMode, localStream])
 
-
-    const peerConfig: PeerConfig = {
-        iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:global.stun.twilio.com:3478" },
-            { urls: "stun:stun1.l.google.com:19302" },
-            { urls: "stun:stun2.l.google.com:19302" },
-        ],
-        sdpSemantics: "unified-plan",
-        iceTransportPolicy: "all",
-    };
+  const peerConfig: PeerConfig = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:global.stun.twilio.com:3478" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+    ],
+    sdpSemantics: "unified-plan",
+    iceTransportPolicy: "all",
+  }
 
   // Function to create a new peer (initiator)
   const createPeer = useCallback(
@@ -332,8 +342,11 @@ export default function MeetingRoom() {
       })
 
       peer.on("stream", (remoteStream) => {
-        console.log(`Received stream from ${callerId}`)
-        setStreams((prev) => ({ ...prev, [callerId]: remoteStream }))
+        console.log(`Received stream from ${callerId}`, remoteStream)
+        // Make sure we're updating state with a valid stream
+        if (remoteStream && remoteStream.id) {
+          setStreams((prev) => ({ ...prev, [callerId]: remoteStream }))
+        }
       })
 
       // Add bandwidth estimation
@@ -514,30 +527,38 @@ export default function MeetingRoom() {
               </Card>
 
               {/* Remote videos */}
-              {Object.entries(streams).map(([userId, stream]) => (
-                <Card key={userId} className="relative overflow-hidden">
-                  {audioOnlyMode ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-muted">
-                      <div className="text-center">
-                        <Mic className="h-12 w-12 mx-auto mb-2" />
-                        <p>Audio Only Mode</p>
+              {Object.entries(streams).map(([userId, stream]) => {
+                console.log(`Rendering stream for ${userId}:`, stream)
+                return (
+                  <Card key={userId} className="relative overflow-hidden">
+                    {audioOnlyMode ? (
+                      <div className="absolute inset-0 flex items-center justify-center bg-muted">
+                        <div className="text-center">
+                          <Mic className="h-12 w-12 mx-auto mb-2" />
+                          <p>Audio Only Mode</p>
+                        </div>
                       </div>
+                    ) : (
+                      <video
+                        autoPlay
+                        playsInline
+                        className="w-full h-full object-cover"
+                        ref={(el) => {
+                          if (el) {
+                            console.log(`Setting srcObject for ${userId}`)
+                            el.srcObject = stream
+                            // Ensure video plays
+                            el.play().catch((err) => console.error(`Error playing video for ${userId}:`, err))
+                          }
+                        }}
+                      />
+                    )}
+                    <div className="absolute bottom-2 left-2 bg-background/80 px-2 py-1 rounded text-sm">
+                      {participantNames[userId] || userId}
                     </div>
-                  ) : (
-                    <video
-                      autoPlay
-                      playsInline
-                      className="w-full h-full object-cover"
-                      ref={(el) => {
-                        if (el) el.srcObject = stream
-                      }}
-                    />
-                  )}
-                  <div className="absolute bottom-2 left-2 bg-background/80 px-2 py-1 rounded text-sm">
-                    {participantNames[userId] || userId}
-                  </div>
-                </Card>
-              ))}
+                  </Card>
+                )
+              })}
             </div>
           )}
         </div>
@@ -595,9 +616,13 @@ export default function MeetingRoom() {
                   const videoTrack = stream.getVideoTracks()[0]
 
                   Object.values(peersRef.current).forEach((peer) => {
-                   const sender = (peer as unknown as RTCPeerConnection).getSenders().find((s) => s.track?.kind === "video")
-                    if (sender) {
-                      sender.replaceTrack(videoTrack)
+                    // Cast peer to the correct type
+                    const peerConnection = (peer as unknown as Peer)._pc
+                    if (peerConnection) {
+                      const sender = peerConnection.getSenders().find((s) => s.track?.kind === "video")
+                      if (sender) {
+                        sender.replaceTrack(videoTrack)
+                      }
                     }
                   })
 
@@ -605,9 +630,13 @@ export default function MeetingRoom() {
                     if (localStream) {
                       const originalVideoTrack = localStream.getVideoTracks()[0]
                       Object.values(peersRef.current).forEach((peer) => {
-                        const sender = (peer as unknown as RTCPeerConnection).getSenders().find((s) => s.track?.kind === "video")
-                        if (sender) {
-                          sender.replaceTrack(originalVideoTrack)
+                        // Cast peer to the correct type
+                        const peerConnection = (peer as unknown as Peer)._pc
+                        if (peerConnection) {
+                          const sender = peerConnection.getSenders().find((s) => s.track?.kind === "video")
+                          if (sender) {
+                            sender.replaceTrack(originalVideoTrack)
+                          }
                         }
                       })
                     }
