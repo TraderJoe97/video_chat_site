@@ -6,9 +6,9 @@ import { Server } from "socket.io";
 
 dotenv.config();
 
-const PORT = process.env.PORT || 4000;
-const MONGO_URI = process.env.MONGO_URI || "";
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const PORT = process.env.PORT;
+const MONGO_URI = process.env.MONGO_URI;
+const FRONTEND_URL = process.env.FRONTEND_URL;
 
 if (!MONGO_URI) {
   throw new Error("MongoDB URI is not defined!");
@@ -45,29 +45,40 @@ app.get("/test-meetings", async (req, res) => {
   }
 });
 
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: FRONTEND_URL, methods: ["GET", "POST"] },
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok", message: "Server is running" });
 });
 
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] },
+   transports: ['websocket', 'polling']
+});
 // Use an in-memory map to track active users per meeting
 const activeUsers = new Map();
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
+  socket.on('ping', (data) => {
+    console.log('Received ping:', data);
+    socket.emit('pong', 'Hello client');
+  });
+
   socket.on("join-room", async ({ meetingId, userId, username }) => {
-    console.log(`Received join-room for meeting ${meetingId} from user ${username} (${userId})`);
+    console.log(
+      `Received join-room for meeting ${meetingId} from user ${username} (${userId})`
+    );
 
     // Create or update the activeUsers set for this meeting
     if (!activeUsers.has(meetingId)) {
       activeUsers.set(meetingId, new Map());
     }
     const usersMap = activeUsers.get(meetingId);
-    
+
     // Store both userId and username
     usersMap.set(userId, username || userId);
-    
+
     // Optionally create the meeting record if not exists
     try {
       let meeting = await Meeting.findOne({ meetingId });
@@ -83,20 +94,20 @@ io.on("connection", (socket) => {
     } catch (error) {
       console.error("Error in join-room meeting check:", error);
     }
-    
+
     socket.join(meetingId);
-    
+
     // Send the username along with the userId
-    socket.to(meetingId).emit("user-connected", { 
-      userId, 
-      username: username || userId 
+    socket.to(meetingId).emit("user-connected", {
+      userId,
+      username: username || userId,
     });
-    
+
     // Send existing participants to the new user
     const existingParticipants = Array.from(usersMap.entries())
       .filter(([id]) => id !== userId)
       .map(([id, name]) => ({ userId: id, username: name }));
-      
+
     if (existingParticipants.length > 0) {
       socket.emit("existing-participants", existingParticipants);
     }
@@ -111,41 +122,48 @@ io.on("connection", (socket) => {
 
   // WebRTC signaling: offer, answer, candidate events
   socket.on("offer", (data) => {
-    console.log(`Offer from ${data.callerId} for ${data.userId} in meeting ${data.meetingId}`);
-    socket.to(data.meetingId).emit("offer", { 
-      callerId: data.callerId, 
-      userId: data.userId, 
-      offer: data.offer 
+    console.log(
+      `Offer from ${data.callerId} for ${data.userId} in meeting ${data.meetingId}`
+    );
+    socket.to(data.meetingId).emit("offer", {
+      callerId: data.callerId,
+      userId: data.userId,
+      offer: data.offer,
     });
   });
   socket.on("answer", (data) => {
     console.log(`Answer from ${data.callerId} in meeting ${data.meetingId}`);
-    socket.to(data.meetingId).emit("answer", { callerId: data.callerId, answer: data.answer });
+    socket
+      .to(data.meetingId)
+      .emit("answer", { callerId: data.callerId, answer: data.answer });
   });
   socket.on("candidate", (data) => {
     console.log(`Candidate from ${data.callerId} in meeting ${data.meetingId}`);
-    socket.to(data.meetingId).emit("candidate", { callerId: data.callerId, candidate: data.candidate });
+    socket.to(data.meetingId).emit("candidate", {
+      callerId: data.callerId,
+      candidate: data.candidate,
+    });
   });
 
   socket.on("disconnect", () => {
     console.log("Socket disconnected:", socket.id);
-    
+
     // Find which meeting this socket was in
     for (const [meetingId, usersMap] of activeUsers.entries()) {
       if (usersMap.has(socket.id)) {
         // Remove the user from the meeting
         usersMap.delete(socket.id);
-        
+
         // Notify other participants
         socket.to(meetingId).emit("user-disconnected", socket.id);
-        
+
         // If the meeting is empty wait 30 min then remove it
         if (usersMap.size === 0) {
           setTimeout(() => {
             activeUsers.delete(meetingId);
           }, 30 * 60 * 1000);
         }
-        
+
         break;
       }
     }
@@ -155,4 +173,3 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
