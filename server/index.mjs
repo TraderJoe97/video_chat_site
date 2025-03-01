@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 
 dotenv.config();
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 4000;
 const MONGO_URI = process.env.MONGO_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL;
 
@@ -51,16 +51,19 @@ app.get("/api/health", (req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: FRONTEND_URL, methods: ["GET", "POST"] },
-   transports: ['websocket', 'polling']
+  cors: { 
+    origin: FRONTEND_URL, 
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  transports: ['websocket', 'polling']
 });
 // Use an in-memory map to track active users per meeting
 const activeUsers = new Map();
 
-io.on("connection", (socket) => {
+io.on("connect", (socket) => {
   console.log("Socket connected:", socket.id);
-  socket.on("connect_error", (err) => {
-    console.error("Socket connection error:", err);})
+
   socket.on('ping', (data) => {
     console.log('Received ping:', data);
     socket.emit('pong', 'Hello client');
@@ -174,3 +177,4 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
