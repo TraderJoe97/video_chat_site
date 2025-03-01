@@ -13,7 +13,7 @@ export default function SocketTestPage() {
   const [serverHealth, setServerHealth] = useState<string>("Checking...")
 
   const connectSocket = () => {
-    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000", {
+    const newSocket = io(process.env.BACKEND_URL, {
       transports: ["websocket", "polling"],
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
@@ -46,7 +46,7 @@ export default function SocketTestPage() {
 
   const checkServerHealth = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000"}/api/health`)
+      const response = await fetch(`${process.env.BACKEND_URL}/api/health`)
       if (response.ok) {
         const data = await response.json()
         setServerHealth(data.status === "ok" ? "Server is healthy" : "Server not healthy")
