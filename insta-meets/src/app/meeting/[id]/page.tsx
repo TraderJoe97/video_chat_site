@@ -263,19 +263,17 @@ export default function MeetingRoom() {
     }
   }, [connectionQuality, audioOnlyMode, localStream])
 
-  const peerConfig: PeerConfig = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:global.stun.twilio.com:3478" },
-      {
-        urls: "turn:numb.viagenie.ca",
-        username: "webrtc@live.com",
-        credential: "muazkh",
-      },
-    ],
-    sdpSemantics: "unified-plan",
-    iceTransportPolicy: "all",
-  }
+
+    const peerConfig: PeerConfig = {
+        iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:global.stun.twilio.com:3478" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            { urls: "stun:stun2.l.google.com:19302" },
+        ],
+        sdpSemantics: "unified-plan",
+        iceTransportPolicy: "all",
+    };
 
   // Function to create a new peer (initiator)
   const createPeer = useCallback(
