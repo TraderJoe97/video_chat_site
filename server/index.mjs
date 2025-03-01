@@ -59,7 +59,8 @@ const activeUsers = new Map();
 
 io.on("connect", (socket) => {
   console.log("Socket connected:", socket.id);
-
+  socket.on("connect_error", (err) => {
+    console.error("Socket connection error:", err);})
   socket.on('ping', (data) => {
     console.log('Received ping:', data);
     socket.emit('pong', 'Hello client');
