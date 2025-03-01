@@ -56,35 +56,49 @@ const activeUsers = new Map();
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
-  socket.on("join-room", async ({ meetingId, userId }) => {
-    console.log(`Received join-room for meeting ${meetingId} from user ${userId}`);
+  socket.on("join-room", async ({ meetingId, userId, username }) => {
+    console.log(`Received join-room for meeting ${meetingId} from user ${username} (${userId})`);
 
     // Create or update the activeUsers set for this meeting
     if (!activeUsers.has(meetingId)) {
-      activeUsers.set(meetingId, new Set());
+      activeUsers.set(meetingId, new Map());
     }
-    const usersSet = activeUsers.get(meetingId);
-    if (usersSet.has(userId)) {
-      console.warn(`User ${userId} is already registered for meeting ${meetingId}`);
-    } else {
-      usersSet.add(userId);
-      // Optionally create the meeting record if not exists
-      try {
-        let meeting = await Meeting.findOne({ meetingId });
-        if (!meeting) {
-          meeting = new Meeting({
-            meetingId,
-            hostId: userId, // first to join becomes host
-            meetingName: "Meeting " + meetingId,
-          });
-          console.log("Creating new meeting record:", meeting);
-          await meeting.save().catch((err) => console.error("Save error:", err));
-        }
-      } catch (error) {
-        console.error("Error in join-room meeting check:", error);
+    const usersMap = activeUsers.get(meetingId);
+    
+    // Store both userId and username
+    usersMap.set(userId, username || userId);
+    
+    // Optionally create the meeting record if not exists
+    try {
+      let meeting = await Meeting.findOne({ meetingId });
+      if (!meeting) {
+        meeting = new Meeting({
+          meetingId,
+          hostId: userId, // first to join becomes host
+          meetingName: "Meeting " + meetingId,
+        });
+        console.log("Creating new meeting record:", meeting);
+        await meeting.save().catch((err) => console.error("Save error:", err));
       }
-      socket.join(meetingId);
-      socket.to(meetingId).emit("user-connected", userId);
+    } catch (error) {
+      console.error("Error in join-room meeting check:", error);
+    }
+    
+    socket.join(meetingId);
+    
+    // Send the username along with the userId
+    socket.to(meetingId).emit("user-connected", { 
+      userId, 
+      username: username || userId 
+    });
+    
+    // Send existing participants to the new user
+    const existingParticipants = Array.from(usersMap.entries())
+      .filter(([id]) => id !== userId)
+      .map(([id, name]) => ({ userId: id, username: name }));
+      
+    if (existingParticipants.length > 0) {
+      socket.emit("existing-participants", existingParticipants);
     }
   });
 
@@ -98,7 +112,11 @@ io.on("connection", (socket) => {
   // WebRTC signaling: offer, answer, candidate events
   socket.on("offer", (data) => {
     console.log(`Offer from ${data.callerId} for ${data.userId} in meeting ${data.meetingId}`);
-    socket.to(data.meetingId).emit("offer", { callerId: data.callerId, userId: data.userId, offer: data.offer });
+    socket.to(data.meetingId).emit("offer", { 
+      callerId: data.callerId, 
+      userId: data.userId, 
+      offer: data.offer 
+    });
   });
   socket.on("answer", (data) => {
     console.log(`Answer from ${data.callerId} in meeting ${data.meetingId}`);
@@ -111,10 +129,30 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("Socket disconnected:", socket.id);
-    // Cleanup: Remove user from activeUsers if you maintain a mapping for disconnect.
+    
+    // Find which meeting this socket was in
+    for (const [meetingId, usersMap] of activeUsers.entries()) {
+      if (usersMap.has(socket.id)) {
+        // Remove the user from the meeting
+        usersMap.delete(socket.id);
+        
+        // Notify other participants
+        socket.to(meetingId).emit("user-disconnected", socket.id);
+        
+        // If the meeting is empty wait 30 min then remove it
+        if (usersMap.size === 0) {
+          setTimeout(() => {
+            activeUsers.delete(meetingId);
+          }, 30 * 60 * 1000);
+        }
+        
+        break;
+      }
+    }
   });
 });
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+

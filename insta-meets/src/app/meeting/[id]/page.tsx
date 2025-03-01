@@ -1,65 +1,91 @@
-"use client";
-import { useEffect, useState, useRef } from "react";
-import { useParams, useSearchParams } from "next/navigation";
-import { useAuth0 } from "@auth0/auth0-react";
-import { io, Socket } from "socket.io-client";
-import Peer, { SignalData } from "simple-peer";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Mic, MicOff, VideoIcon, VideoOff, PhoneOff, MessageSquare, Users, Share, Copy } from "lucide-react";
-import { ChatPanel } from "@/components/chat-panel";
-import { ParticipantsPanel } from "@/components/participants-panel";
-import { toast } from "sonner";
+"use client"
+import { useEffect, useState, useRef, useCallback } from "react"
+import { useParams, useSearchParams } from "next/navigation"
+import { useAuth0 } from "@auth0/auth0-react"
+import { io, type Socket } from "socket.io-client"
+import Peer, { type SignalData } from "simple-peer"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import {
+  Mic,
+  MicOff,
+  VideoIcon,
+  VideoOff,
+  PhoneOff,
+  MessageSquare,
+  Users,
+  Share,
+  Copy,
+  Wifi,
+  WifiOff,
+} from "lucide-react"
+import { ChatPanel } from "@/components/chat-panel"
+import { ParticipantsPanel } from "@/components/participants-panel"
+import { toast } from "sonner"
 
 interface Message {
-  text: string;
-  sender: string;
-  timestamp: string;
+  text: string
+  sender: string
+  timestamp: string
+  meetingId?: string
+  isFromMe?: boolean
 }
 
 interface Participant {
-  id: string;
-  name: string;
-  isYou?: boolean;
+  id: string
+  name: string
+  isYou?: boolean
 }
 
 interface Peers {
-  [key: string]: Peer.Instance;
+  [key: string]: Peer.Instance
 }
 
 interface Streams {
-  [key: string]: MediaStream;
+  [key: string]: MediaStream
+}
+
+interface ParticipantMap {
+  [key: string]: string
+}
+
+interface PeerConfig {
+  iceServers: RTCIceServer[]
+  sdpSemantics: "unified-plan" | "plan-b"
+  iceTransportPolicy: RTCIceTransportPolicy
 }
 
 export default function MeetingRoom() {
-  const { id } = useParams<{ id: string }>();
-  const searchParams = useSearchParams();
-  const { user, isAuthenticated } = useAuth0();
+  const { id } = useParams<{ id: string }>()
+  const searchParams = useSearchParams()
+  const { user, isAuthenticated } = useAuth0()
 
   // State
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [peers, setPeers] = useState<Peers>({});
-  const [streams, setStreams] = useState<Streams>({});
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [showChat, setShowChat] = useState(false);
-  const [showParticipants, setShowParticipants] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [isConnecting, setIsConnecting] = useState(true);
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const peersRef = useRef<Peers>({});
-  const socketRef = useRef<Socket | null>(null);
-  const userIdRef = useRef<string>(
-    isAuthenticated ? user?.sub || "Guest" : searchParams.get("name") || "Guest"
-  );
+  const [socket, setSocket] = useState<Socket | null>(null)
+  const [peers, setPeers] = useState<Peers>({})
+  const [streams, setStreams] = useState<Streams>({})
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [audioEnabled, setAudioEnabled] = useState(true)
+  const [videoEnabled, setVideoEnabled] = useState(true)
+  const [showChat, setShowChat] = useState(false)
+  const [showParticipants, setShowParticipants] = useState(false)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [participants, setParticipants] = useState<Participant[]>([])
+  const [participantNames, setParticipantNames] = useState<ParticipantMap>({})
+  const [isConnecting, setIsConnecting] = useState(true)
+  const [connectionQuality, setConnectionQuality] = useState<"good" | "fair" | "poor">("good")
+  const [audioOnlyMode, setAudioOnlyMode] = useState(false)
+  const localVideoRef = useRef<HTMLVideoElement | null>(null)
+  const peersRef = useRef<Peers>({})
+  const socketRef = useRef<Socket | null>(null)
+  const userIdRef = useRef<string>(isAuthenticated ? user?.sub || "Guest" : searchParams.get("name") || "Guest")
+  const bandwidthRef = useRef<number>(1000) // Initial bandwidth estimate (kbps)
 
   useEffect(() => {
     // Prompt for name if needed
     if (!isAuthenticated && !searchParams.get("name")) {
-      const name = prompt("Please enter your name to join the meeting", "Guest");
-      if (name) userIdRef.current = name;
+      const name = prompt("Please enter your name to join the meeting", "Guest")
+      if (name) userIdRef.current = name
     }
 
     const init = async () => {
@@ -67,196 +93,291 @@ export default function MeetingRoom() {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true,
-        });
-        setLocalStream(stream);
+        })
+        setLocalStream(stream)
         if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
+          localVideoRef.current.srcObject = stream
         }
 
-        const socketConnection = io(
-          process.env.BACKEND_URL || "http://localhost:4000"
-        );
-        socketRef.current = socketConnection;
-        setSocket(socketConnection);
+        const socketConnection = io(process.env.BACKEND_URL || "http://localhost:4000")
+        socketRef.current = socketConnection
+        setSocket(socketConnection)
 
         // Register socket events once:
         socketConnection.on("connect", () => {
-          console.log("Connected to socket server");
+          console.log("Connected to socket server")
           socketConnection.emit("join-room", {
             meetingId: id,
             userId: userIdRef.current,
-          });
-        });
+          })
+        })
 
         // Prevent duplicate participants by checking if the user is already in the list
         socketConnection.on("user-connected", (userId: string) => {
-          console.log("User connected:", userId);
+          console.log("User connected:", userId)
           setParticipants((prev) => {
-            if (prev.some((p) => p.id === userId)) return prev;
-            return [...prev, { id: userId, name: userId }];
-          });
+            if (prev.some((p) => p.id === userId)) return prev
+            return [...prev, { id: userId, name: userId }]
+          })
           // Create a new peer connection only if one does not exist.
           if (!peersRef.current[userId]) {
-            const peer = createPeer(userId, socketConnection.id, stream);
-            peersRef.current[userId] = peer;
-            setPeers((prev) => ({ ...prev, [userId]: peer }));
+            const peer = createPeer(userId, socketConnection.id, stream)
+            peersRef.current[userId] = peer
+            setPeers((prev) => ({ ...prev, [userId]: peer }))
           }
-        });
+        })
 
         socketConnection.on("user-disconnected", (userId: string) => {
-          console.log("User disconnected:", userId);
-          setParticipants((prev) => prev.filter((p) => p.id !== userId));
+          console.log("User disconnected:", userId)
+          setParticipants((prev) => prev.filter((p) => p.id !== userId))
           if (peersRef.current[userId]) {
-            peersRef.current[userId].destroy();
-            delete peersRef.current[userId];
+            peersRef.current[userId].destroy()
+            delete peersRef.current[userId]
             setPeers((prev) => {
-              const updated = { ...prev };
-              delete updated[userId];
-              return updated;
-            });
+              const updated = { ...prev }
+              delete updated[userId]
+              return updated
+            })
             setStreams((prev) => {
-              const updated = { ...prev };
-              delete updated[userId];
-              return updated;
-            });
+              const updated = { ...prev }
+              delete updated[userId]
+              return updated
+            })
           }
-        });
+        })
 
         socketConnection.on("createMessage", (message: Message) => {
-          setMessages((prev) => [...prev, message]);
-        });
+          // Only add the message if it's not from the current user or doesn't have the isFromMe flag
+          if (message.sender !== userIdRef.current || !message.isFromMe) {
+            setMessages((prev) => [...prev, message])
+          }
+        })
 
         // Handle offer event: when another user initiates a call.
-        socketConnection.on(
-          "offer",
-          (data: { offer: SignalData; callerId: string }) => {
-            const peer = addPeer(data.offer, data.callerId, stream);
-            peersRef.current[data.callerId] = peer;
-            setPeers((prev) => ({ ...prev, [data.callerId]: peer }));
-          }
-        );
+        socketConnection.on("offer", (data: { offer: SignalData; callerId: string }) => {
+          const peer = addPeer(data.offer, data.callerId, stream)
+          peersRef.current[data.callerId] = peer
+          setPeers((prev) => ({ ...prev, [data.callerId]: peer }))
+        })
 
         // Handle answer with stable state checking
-        socketConnection.on(
-          "answer",
-          (data: { answer: SignalData; callerId: string }) => {
-            const peer = peersRef.current[data.callerId];
-            if (peer) {
-              const pc = (peer as any)._pc;
-              // Only signal the answer if the underlying RTCPeerConnection is in "have-local-offer" state.
-              if (pc && pc.signalingState === "have-local-offer") {
-                console.log(`Setting remote answer for ${data.callerId}`);
-                peer.signal(data.answer);
-              } else {
-                console.warn(
-                  `Answer from ${data.callerId} ignored (signalingState: ${pc ? pc.signalingState : "unknown"})`
-                );
-              }
+        socketConnection.on("answer", (data: { answer: SignalData; callerId: string }) => {
+          const peer = peersRef.current[data.callerId]
+          if (peer) {
+            const pc = (peer as any)._pc
+            // Only signal the answer if the underlying RTCPeerConnection is in "have-local-offer" state.
+            if (pc && pc.signalingState === "have-local-offer") {
+              console.log(`Setting remote answer for ${data.callerId}`)
+              peer.signal(data.answer)
+            } else {
+              console.warn(
+                `Answer from ${data.callerId} ignored (signalingState: ${pc ? pc.signalingState : "unknown"})`,
+              )
             }
           }
-        );
+        })
 
         // Handle ICE candidates
-        socketConnection.on(
-          "candidate",
-          (data: { candidate: SignalData; callerId: string }) => {
-            if (peersRef.current[data.callerId]) {
-              peersRef.current[data.callerId].signal(data.candidate);
-            }
+        socketConnection.on("candidate", (data: { candidate: SignalData; callerId: string }) => {
+          if (peersRef.current[data.callerId]) {
+            peersRef.current[data.callerId].signal(data.candidate)
           }
-        );
+        })
 
-        setIsConnecting(false);
+        socketConnection.on("existing-participants", (participants: Array<{ userId: string; username: string }>) => {
+          console.log("Existing participants:", participants)
+
+          // Update participants state
+          setParticipants((prev) => {
+            const newParticipants = [...prev]
+
+            participants.forEach(({ userId, username }) => {
+              if (!newParticipants.some((p) => p.id === userId)) {
+                newParticipants.push({ id: userId, name: username || userId })
+              }
+            })
+
+            return newParticipants
+          })
+
+          // Update participant names mapping
+          const namesMap: ParticipantMap = {}
+          participants.forEach(({ userId, username }) => {
+            namesMap[userId] = username || userId
+          })
+
+          setParticipantNames((prev) => ({
+            ...prev,
+            ...namesMap,
+          }))
+        })
+
+        setIsConnecting(false)
       } catch (error) {
-        console.error("Error initializing meeting:", error);
-        toast.error("Could not access camera or microphone. Please check permissions.");
-        setIsConnecting(false);
+        console.error("Error initializing meeting:", error)
+        toast.error("Could not access camera or microphone. Please check permissions.")
+        setIsConnecting(false)
       }
-    };
+    }
 
-    init();
+    init()
 
     // Cleanup on unmount
     return () => {
       if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
+        localStream.getTracks().forEach((track) => track.stop())
       }
-      Object.values(peersRef.current).forEach((peer) => peer.destroy());
-      if (socketRef.current) socketRef.current.disconnect();
-    };
-  }, [id, isAuthenticated, searchParams]);
+      Object.values(peersRef.current).forEach((peer) => peer.destroy())
+      if (socketRef.current) socketRef.current.disconnect()
+    }
+  }, [id, isAuthenticated, searchParams, localStream])
+
+  useEffect(() => {
+    // Debug logging for streams
+    if (Object.keys(streams).length > 0) {
+      console.log("Current streams:", Object.keys(streams))
+    }
+  }, [streams])
+
+  useEffect(() => {
+    if (connectionQuality === "poor" && !audioOnlyMode) {
+      setAudioOnlyMode(true)
+      toast.warning("Switching to audio-only mode due to poor connection")
+      if (localStream) {
+        localStream.getVideoTracks().forEach((track) => {
+          track.enabled = false
+        })
+      }
+    } else if (connectionQuality !== "poor" && audioOnlyMode) {
+      setAudioOnlyMode(false)
+      toast.success("Video enabled: Connection quality improved")
+      if (localStream) {
+        localStream.getVideoTracks().forEach((track) => {
+          track.enabled = true
+        })
+      }
+    }
+  }, [connectionQuality, audioOnlyMode, localStream])
+
+  const peerConfig: PeerConfig = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:global.stun.twilio.com:3478" },
+      {
+        urls: "turn:numb.viagenie.ca",
+        username: "webrtc@live.com",
+        credential: "muazkh",
+      },
+    ],
+    sdpSemantics: "unified-plan",
+    iceTransportPolicy: "all",
+  }
 
   // Function to create a new peer (initiator)
-  const createPeer = (userId: string, socketId: string, stream: MediaStream) => {
-    console.log(`Creating peer for ${userId}`);
-    const peer = new Peer({
-      initiator: true,
-      trickle: false,
-      stream,
-      
-    });
+  const createPeer = useCallback(
+    (userId: string, socketId: string, stream: MediaStream) => {
+      console.log(`Creating peer for ${userId}`)
+      const peer = new Peer({
+        initiator: true,
+        trickle: false,
+        stream,
+        config: peerConfig,
+      })
 
-    peer.on("signal", (data) => {
-      console.log(`Sending offer to ${userId}`);
-      socketRef.current?.emit("offer", {
-        meetingId: id,
-        callerId: socketId,
-        userId,
-        offer: data,
-      });
-    });
+      peer.on("signal", (data) => {
+        console.log(`Sending offer to ${userId}`)
+        socketRef.current?.emit("offer", {
+          meetingId: id,
+          callerId: socketId,
+          userId,
+          offer: data,
+        })
+      })
 
-    peer.on("stream", (remoteStream) => {
-      console.log(`Received stream from ${userId}`);
-      setStreams((prev) => ({ ...prev, [userId]: remoteStream }));
-    });
+      peer.on("stream", (remoteStream) => {
+        console.log(`Received stream from ${userId}`)
+        setStreams((prev) => ({ ...prev, [userId]: remoteStream }))
+      })
 
-    return peer;
-  };
+      // Add bandwidth estimation
+      peer.on("data", (data) => {
+        const message = JSON.parse(data)
+        if (message.type === "bandwidth") {
+          bandwidthRef.current = message.value
+          updateConnectionQuality(message.value)
+        }
+      })
+
+      return peer
+    },
+    [id],
+  )
 
   // Function to add a peer when receiving an offer
-  const addPeer = (incomingSignal: SignalData, callerId: string, stream: MediaStream) => {
-    console.log(`Adding peer for ${callerId}`);
-    const peer = new Peer({
-      initiator: false,
-      trickle: false,
-      stream,
- 
-    });
+  const addPeer = useCallback(
+    (incomingSignal: SignalData, callerId: string, stream: MediaStream) => {
+      console.log(`Adding peer for ${callerId}`)
+      const peer = new Peer({
+        initiator: false,
+        trickle: false,
+        stream,
+        config: peerConfig,
+      })
 
-    peer.on("signal", (data) => {
-      console.log(`Sending answer to ${callerId}`);
-      socketRef.current?.emit("answer", { meetingId: id, callerId, answer: data });
-    });
+      peer.on("signal", (data) => {
+        console.log(`Sending answer to ${callerId}`)
+        socketRef.current?.emit("answer", { meetingId: id, callerId, answer: data })
+      })
 
-    peer.on("stream", (remoteStream) => {
-      console.log(`Received stream from ${callerId}`);
-      setStreams((prev) => ({ ...prev, [callerId]: remoteStream }));
-    });
+      peer.on("stream", (remoteStream) => {
+        console.log(`Received stream from ${callerId}`)
+        setStreams((prev) => ({ ...prev, [callerId]: remoteStream }))
+      })
 
-    // Process the incoming offer
-    peer.signal(incomingSignal);
-    return peer;
-  };
+      // Add bandwidth estimation
+      peer.on("data", (data) => {
+        const message = JSON.parse(data)
+        if (message.type === "bandwidth") {
+          bandwidthRef.current = message.value
+          updateConnectionQuality(message.value)
+        }
+      })
+
+      peer.signal(incomingSignal)
+      return peer
+    },
+    [id],
+  )
+
+  const updateConnectionQuality = (bandwidth: number) => {
+    if (bandwidth > 1000) {
+      setConnectionQuality("good")
+    } else if (bandwidth > 500) {
+      setConnectionQuality("fair")
+    } else {
+      setConnectionQuality("poor")
+    }
+  }
+
   // Toggle audio
   const toggleAudio = () => {
     if (localStream) {
       localStream.getAudioTracks().forEach((track) => {
-        track.enabled = !track.enabled;
-      });
-      setAudioEnabled(!audioEnabled);
+        track.enabled = !track.enabled
+      })
+      setAudioEnabled(!audioEnabled)
     }
-  };
+  }
 
   // Toggle video
   const toggleVideo = () => {
     if (localStream) {
       localStream.getVideoTracks().forEach((track) => {
-        track.enabled = !track.enabled;
-      });
-      setVideoEnabled(!videoEnabled);
+        track.enabled = !track.enabled
+      })
+      setVideoEnabled(!videoEnabled)
     }
-  };
+  }
 
   // Send message
   const sendMessage = (text: string) => {
@@ -266,23 +387,62 @@ export default function MeetingRoom() {
         sender: userIdRef.current,
         timestamp: new Date().toISOString(),
         meetingId: id,
-      };
-      socket.emit("message", messageData);
-      setMessages((prev) => [...prev, messageData]);
+        isFromMe: true, // Add this flag to identify locally sent messages
+      }
+      socket.emit("message", messageData)
+      setMessages((prev) => [...prev, messageData])
     }
-  };
+  }
 
   // Share meeting link
   const shareMeeting = () => {
-    const meetingLink = `${window.location.origin}/meeting/${id}`;
-    navigator.clipboard.writeText(meetingLink);
-    toast.success("Meeting link copied to clipboard");
-  };
+    const meetingLink = `${window.location.origin}/meeting/${id}`
+    navigator.clipboard.writeText(meetingLink)
+    toast.success("Meeting link copied to clipboard")
+  }
 
   // Leave meeting
   const leaveMeeting = () => {
-    window.location.href = "/dashboard";
-  };
+    window.location.href = "/dashboard"
+  }
+
+  const adjustVideoQuality = useCallback(() => {
+    if (localStream) {
+      const videoTrack = localStream.getVideoTracks()[0]
+      if (videoTrack) {
+        let quality: "high" | "medium" | "low"
+        if (bandwidthRef.current > 1000) {
+          quality = "high"
+        } else if (bandwidthRef.current > 500) {
+          quality = "medium"
+        } else {
+          quality = "low"
+        }
+
+        const constraints: MediaTrackConstraints = {
+          width: quality === "high" ? 1280 : quality === "medium" ? 640 : 320,
+          height: quality === "high" ? 720 : quality === "medium" ? 480 : 240,
+          frameRate: quality === "high" ? 30 : quality === "medium" ? 20 : 15,
+        }
+
+        videoTrack
+          .applyConstraints(constraints)
+          .then(() => console.log("Video quality adjusted:", quality))
+          .catch((error) => console.error("Error adjusting video quality:", error))
+      }
+    }
+  }, [localStream])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      adjustVideoQuality()
+      Object.values(peersRef.current).forEach((peer) => {
+        peer.send(JSON.stringify({ type: "bandwidth", value: bandwidthRef.current }))
+      })
+    }, 5000) // Check every 5 seconds
+
+    return () => clearInterval(interval)
+  }, [adjustVideoQuality])
 
   return (
     <div className="flex flex-col h-screen bg-background">
@@ -302,6 +462,12 @@ export default function MeetingRoom() {
             <MessageSquare className="h-4 w-4 mr-2" />
             Chat
           </Button>
+          <div className="flex items-center gap-1">
+            {connectionQuality === "good" && <Wifi className="h-5 w-5 text-green-500" />}
+            {connectionQuality === "fair" && <Wifi className="h-5 w-5 text-yellow-500" />}
+            {connectionQuality === "poor" && <WifiOff className="h-5 w-5 text-red-500" />}
+            <span className="text-sm">{connectionQuality}</span>
+          </div>
         </div>
       </header>
 
@@ -317,14 +483,23 @@ export default function MeetingRoom() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr h-full">
               {/* Local video */}
               <Card className="relative overflow-hidden">
-                <video
-                  ref={localVideoRef}
-                  muted
-                  autoPlay
-                  playsInline
-                  className={`w-full h-full object-cover ${!videoEnabled ? "hidden" : ""}`}
-                />
-                {!videoEnabled && (
+                {audioOnlyMode ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-muted">
+                    <div className="text-center">
+                      <Mic className="h-12 w-12 mx-auto mb-2" />
+                      <p>Audio Only Mode</p>
+                    </div>
+                  </div>
+                ) : (
+                  <video
+                    ref={localVideoRef}
+                    muted
+                    autoPlay
+                    playsInline
+                    className={`w-full h-full object-cover ${!videoEnabled ? "hidden" : ""}`}
+                  />
+                )}
+                {!videoEnabled && !audioOnlyMode && (
                   <div className="absolute inset-0 flex items-center justify-center bg-muted">
                     <div className="h-20 w-20 rounded-full bg-primary flex items-center justify-center text-2xl text-primary-foreground font-bold">
                       {userIdRef.current.charAt(0).toUpperCase()}
@@ -339,15 +514,26 @@ export default function MeetingRoom() {
               {/* Remote videos */}
               {Object.entries(streams).map(([userId, stream]) => (
                 <Card key={userId} className="relative overflow-hidden">
-                  <video
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover"
-                    ref={(el) => {
-                      if (el) el.srcObject = stream;
-                    }}
-                  />
-                  <div className="absolute bottom-2 left-2 bg-background/80 px-2 py-1 rounded text-sm">{userId}</div>
+                  {audioOnlyMode ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-muted">
+                      <div className="text-center">
+                        <Mic className="h-12 w-12 mx-auto mb-2" />
+                        <p>Audio Only Mode</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <video
+                      autoPlay
+                      playsInline
+                      className="w-full h-full object-cover"
+                      ref={(el) => {
+                        if (el) el.srcObject = stream
+                      }}
+                    />
+                  )}
+                  <div className="absolute bottom-2 left-2 bg-background/80 px-2 py-1 rounded text-sm">
+                    {participantNames[userId] || userId}
+                  </div>
                 </Card>
               ))}
             </div>
@@ -364,7 +550,14 @@ export default function MeetingRoom() {
         {showParticipants && (
           <div className="w-80 border-l bg-background flex flex-col h-full">
             <ParticipantsPanel
-              participants={[...participants, { id: userIdRef.current, name: userIdRef.current, isYou: true }]}
+              participants={[
+                { id: userIdRef.current, name: userIdRef.current, isYou: true },
+                ...participants.map((p) => ({
+                  id: p.id,
+                  name: participantNames[p.id] || p.id,
+                  isYou: false,
+                })),
+              ]}
             />
           </div>
         )}
@@ -397,31 +590,31 @@ export default function MeetingRoom() {
               navigator.mediaDevices
                 .getDisplayMedia({ video: true })
                 .then((stream) => {
-                  const videoTrack = stream.getVideoTracks()[0];
+                  const videoTrack = stream.getVideoTracks()[0]
 
                   Object.values(peersRef.current).forEach((peer) => {
-                    const sender = peer.getSenders().find((s) => s.track?.kind === "video");
+                    const sender = peer.getSenders().find((s) => s.track?.kind === "video")
                     if (sender) {
-                      sender.replaceTrack(videoTrack);
+                      sender.replaceTrack(videoTrack)
                     }
-                  });
+                  })
 
                   videoTrack.onended = () => {
                     if (localStream) {
-                      const originalVideoTrack = localStream.getVideoTracks()[0];
+                      const originalVideoTrack = localStream.getVideoTracks()[0]
                       Object.values(peersRef.current).forEach((peer) => {
-                        const sender = peer.getSenders().find((s) => s.track?.kind === "video");
+                        const sender = peer.getSenders().find((s) => s.track?.kind === "video")
                         if (sender) {
-                          sender.replaceTrack(originalVideoTrack);
+                          sender.replaceTrack(originalVideoTrack)
                         }
-                      });
+                      })
                     }
-                  };
+                  }
                 })
                 .catch((err) => {
-                  console.error("Error sharing screen:", err);
-                  toast.error("Could not share screen. Please check permissions.");
-                });
+                  console.error("Error sharing screen:", err)
+                  toast.error("Could not share screen. Please check permissions.")
+                })
             }}
           >
             <Share className="h-5 w-5" />
@@ -432,6 +625,6 @@ export default function MeetingRoom() {
         </div>
       </footer>
     </div>
-  );
-} 
+  )
+}
 
