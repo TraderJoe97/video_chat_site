@@ -51,7 +51,7 @@ app.get("/api/health", (req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
+  cors: { origin: FRONTEND_URL, methods: ["GET", "POST"] },
    transports: ['websocket', 'polling']
 });
 // Use an in-memory map to track active users per meeting
