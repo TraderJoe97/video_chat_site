@@ -3,7 +3,7 @@ import http from "http";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import { Server } from "socket.io";
-import cors from "cors"
+import cors from "cors";
 
 dotenv.config();
 
@@ -31,11 +31,13 @@ const meetingSchema = new mongoose.Schema(
   { collection: "meetings" }
 );
 const Meeting = mongoose.model("Meeting", meetingSchema);
-
-app.use(cors({
-  origin: FRONTEND_URL,
-  methods: ["GET", "POST"],
-}));
+const app = express();
+app.use(
+  cors({
+    origin: FRONTEND_URL,
+    methods: ["GET", "POST"],
+  })
+);
 
 app.use(express.json());
 
@@ -56,12 +58,12 @@ app.get("/api/health", (req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { 
-    origin: FRONTEND_URL, 
+  cors: {
+    origin: FRONTEND_URL,
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
   },
-  transports: ['websocket', 'polling']
+  transports: ["websocket", "polling"],
 });
 // Use an in-memory map to track active users per meeting
 const activeUsers = new Map();
@@ -69,9 +71,9 @@ const activeUsers = new Map();
 io.on("connect", (socket) => {
   console.log("Socket connected:", socket.id);
 
-  socket.on('ping', (data) => {
-    console.log('Received ping:', data);
-    socket.emit('pong', 'Hello client');
+  socket.on("ping", (data) => {
+    console.log("Received ping:", data);
+    socket.emit("pong", "Hello client");
   });
 
   socket.on("join-room", async ({ meetingId, userId, username }) => {
@@ -182,4 +184,3 @@ io.on("connect", (socket) => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
