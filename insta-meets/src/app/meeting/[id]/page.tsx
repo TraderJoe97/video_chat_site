@@ -48,43 +48,38 @@ export default function MeetingRoom() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [isConnecting, setIsConnecting] = useState(true);
-
-  // Refs
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const peersRef = useRef<Peers>({});
   const socketRef = useRef<Socket | null>(null);
-  const userIdRef = useRef<string>(isAuthenticated ? user?.sub || "Guest" : searchParams.get("name") || "Guest");
+  const userIdRef = useRef<string>(
+    isAuthenticated ? user?.sub || "Guest" : searchParams.get("name") || "Guest"
+  );
 
-  // Initialize meeting
   useEffect(() => {
-    // If not authenticated and no name provided, ask for name
+    // Prompt for name if needed
     if (!isAuthenticated && !searchParams.get("name")) {
-      const userName = prompt("Please enter your name to join the meeting", "Guest");
-      if (userName) {
-        userIdRef.current = userName;
-      }
+      const name = prompt("Please enter your name to join the meeting", "Guest");
+      if (name) userIdRef.current = name;
     }
 
-    // Initialize media and socket
     const init = async () => {
       try {
-        // Get user media
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true,
         });
-
         setLocalStream(stream);
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
 
-        // Connect to socket server
-        const socketConnection = io(process.env.BACKEND_URL || "http://localhost:4000");
+        const socketConnection = io(
+          process.env.BACKEND_URL || "http://localhost:4000"
+        );
         socketRef.current = socketConnection;
         setSocket(socketConnection);
 
-        // Socket events
+        // Register socket events once:
         socketConnection.on("connect", () => {
           console.log("Connected to socket server");
           socketConnection.emit("join-room", {
@@ -93,37 +88,36 @@ export default function MeetingRoom() {
           });
         });
 
+        // Prevent duplicate participants by checking if the user is already in the list
         socketConnection.on("user-connected", (userId: string) => {
           console.log("User connected:", userId);
-          setParticipants((prev) => [...prev, { id: userId, name: userId }]);
-
-          const peer = createPeer(userId, socketConnection.id, stream);
-          peersRef.current[userId] = peer;
-
-          setPeers((prevPeers) => ({
-            ...prevPeers,
-            [userId]: peer,
-          }));
+          setParticipants((prev) => {
+            if (prev.some((p) => p.id === userId)) return prev;
+            return [...prev, { id: userId, name: userId }];
+          });
+          // Create a new peer connection only if one does not exist.
+          if (!peersRef.current[userId]) {
+            const peer = createPeer(userId, socketConnection.id, stream);
+            peersRef.current[userId] = peer;
+            setPeers((prev) => ({ ...prev, [userId]: peer }));
+          }
         });
 
         socketConnection.on("user-disconnected", (userId: string) => {
           console.log("User disconnected:", userId);
           setParticipants((prev) => prev.filter((p) => p.id !== userId));
-
           if (peersRef.current[userId]) {
             peersRef.current[userId].destroy();
             delete peersRef.current[userId];
-
-            setPeers((prevPeers) => {
-              const newPeers = { ...prevPeers };
-              delete newPeers[userId];
-              return newPeers;
+            setPeers((prev) => {
+              const updated = { ...prev };
+              delete updated[userId];
+              return updated;
             });
-
-            setStreams((prevStreams) => {
-              const newStreams = { ...prevStreams };
-              delete newStreams[userId];
-              return newStreams;
+            setStreams((prev) => {
+              const updated = { ...prev };
+              delete updated[userId];
+              return updated;
             });
           }
         });
@@ -132,28 +126,45 @@ export default function MeetingRoom() {
           setMessages((prev) => [...prev, message]);
         });
 
-        // WebRTC signaling
-        socketConnection.on("offer", (data: { offer: SignalData; callerId: string }) => {
-          const peer = addPeer(data.offer, data.callerId, localStream);
-          peersRef.current[data.callerId] = peer;
-
-          setPeers((prevPeers) => ({
-            ...prevPeers,
-            [data.callerId]: peer,
-          }));
-        });
-
-        socketConnection.on("answer", (data: { answer: SignalData; callerId: string }) => {
-          if (peersRef.current[data.callerId]) {
-            peersRef.current[data.callerId].signal(data.answer);
+        // Handle offer event: when another user initiates a call.
+        socketConnection.on(
+          "offer",
+          (data: { offer: SignalData; callerId: string }) => {
+            const peer = addPeer(data.offer, data.callerId, stream);
+            peersRef.current[data.callerId] = peer;
+            setPeers((prev) => ({ ...prev, [data.callerId]: peer }));
           }
-        });
+        );
 
-        socketConnection.on("candidate", (data: { candidate: SignalData; callerId: string }) => {
-          if (peersRef.current[data.callerId]) {
-            peersRef.current[data.callerId].signal(data.candidate);
+        // Handle answer with stable state checking
+        socketConnection.on(
+          "answer",
+          (data: { answer: SignalData; callerId: string }) => {
+            const peer = peersRef.current[data.callerId];
+            if (peer) {
+              const pc = (peer as any)._pc;
+              // Only signal the answer if the underlying RTCPeerConnection is in "have-local-offer" state.
+              if (pc && pc.signalingState === "have-local-offer") {
+                console.log(`Setting remote answer for ${data.callerId}`);
+                peer.signal(data.answer);
+              } else {
+                console.warn(
+                  `Answer from ${data.callerId} ignored (signalingState: ${pc ? pc.signalingState : "unknown"})`
+                );
+              }
+            }
           }
-        });
+        );
+
+        // Handle ICE candidates
+        socketConnection.on(
+          "candidate",
+          (data: { candidate: SignalData; callerId: string }) => {
+            if (peersRef.current[data.callerId]) {
+              peersRef.current[data.callerId].signal(data.candidate);
+            }
+          }
+        );
 
         setIsConnecting(false);
       } catch (error) {
@@ -165,58 +176,52 @@ export default function MeetingRoom() {
 
     init();
 
-    // Cleanup
+    // Cleanup on unmount
     return () => {
-      // Stop local stream tracks
       if (localStream) {
         localStream.getTracks().forEach((track) => track.stop());
       }
-
-      // Close all peer connections
-      Object.values(peersRef.current).forEach((peer) => {
-        if (peer) {
-          peer.destroy();
-        }
-      });
-
-      // Disconnect socket
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
+      Object.values(peersRef.current).forEach((peer) => peer.destroy());
+      if (socketRef.current) socketRef.current.disconnect();
     };
   }, [id, isAuthenticated, searchParams]);
 
-  // Create a peer (initiator)
+  // Function to create a new peer (initiator)
   const createPeer = (userId: string, socketId: string, stream: MediaStream) => {
     console.log(`Creating peer for ${userId}`);
     const peer = new Peer({
       initiator: true,
       trickle: false,
       stream,
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // Added STUN server
+      
     });
 
     peer.on("signal", (data) => {
       console.log(`Sending offer to ${userId}`);
-      socketRef.current?.emit("offer", { meetingId: id, callerId: socketId, userId, offer: data });
+      socketRef.current?.emit("offer", {
+        meetingId: id,
+        callerId: socketId,
+        userId,
+        offer: data,
+      });
     });
 
     peer.on("stream", (remoteStream) => {
       console.log(`Received stream from ${userId}`);
-      setStreams((prevStreams) => ({ ...prevStreams, [userId]: remoteStream }));
+      setStreams((prev) => ({ ...prev, [userId]: remoteStream }));
     });
 
     return peer;
   };
 
-  // Add a peer (receiver)
+  // Function to add a peer when receiving an offer
   const addPeer = (incomingSignal: SignalData, callerId: string, stream: MediaStream) => {
     console.log(`Adding peer for ${callerId}`);
     const peer = new Peer({
       initiator: false,
       trickle: false,
       stream,
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // Added STUN server
+ 
     });
 
     peer.on("signal", (data) => {
@@ -226,13 +231,13 @@ export default function MeetingRoom() {
 
     peer.on("stream", (remoteStream) => {
       console.log(`Received stream from ${callerId}`);
-      setStreams((prevStreams) => ({ ...prevStreams, [callerId]: remoteStream }));
+      setStreams((prev) => ({ ...prev, [callerId]: remoteStream }));
     });
 
+    // Process the incoming offer
     peer.signal(incomingSignal);
     return peer;
   };
-
   // Toggle audio
   const toggleAudio = () => {
     if (localStream) {
