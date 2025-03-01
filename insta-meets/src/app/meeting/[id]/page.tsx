@@ -109,7 +109,7 @@ export default function MeetingRoom() {
 
         // Register socket events once:
         socketConnection.on("connect", () => {
-          console.log("Connected to socket server")
+          console.log("Connected to socket server with ID:", socketConnection.id)
           socketConnection.emit("join-room", {
             meetingId: id,
             userId: userIdRef.current,
@@ -128,6 +128,7 @@ export default function MeetingRoom() {
             const peer = createPeer(userId, socketConnection.id ?? "", stream)
             peersRef.current[userId] = peer
             setPeers((prev) => ({ ...prev, [userId]: peer }))
+            monitorPeerConnection(peer, userId)
           }
         })
 
@@ -159,9 +160,11 @@ export default function MeetingRoom() {
 
         // Handle offer event: when another user initiates a call.
         socketConnection.on("offer", (data: { offer: SignalData; callerId: string }) => {
+          console.log(`Received offer from ${data.callerId}`)
           const peer = addPeer(data.offer, data.callerId, stream)
           peersRef.current[data.callerId] = peer
           setPeers((prev) => ({ ...prev, [data.callerId]: peer }))
+          monitorPeerConnection(peer, data.callerId)
         })
 
         // Handle answer with stable state checking
@@ -280,6 +283,17 @@ export default function MeetingRoom() {
       { urls: "stun:global.stun.twilio.com:3478" },
       { urls: "stun:stun1.l.google.com:19302" },
       { urls: "stun:stun2.l.google.com:19302" },
+      // Add these free TURN servers (consider replacing with your own in production)
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
     ],
     sdpSemantics: "unified-plan",
     iceTransportPolicy: "all",
@@ -288,16 +302,16 @@ export default function MeetingRoom() {
   // Function to create a new peer (initiator)
   const createPeer = useCallback(
     (userId: string, socketId: string, stream: MediaStream) => {
-      console.log(`Creating peer for ${userId}`)
+      console.log(`Creating peer for ${userId} with my socket ID ${socketId}`)
       const peer = new Peer({
         initiator: true,
-        trickle: false,
+        trickle: true, // Change to true to use ICE trickle for faster connections
         stream,
         config: peerConfig,
       })
 
       peer.on("signal", (data) => {
-        console.log(`Sending offer to ${userId}`)
+        console.log(`Sending signal to ${userId}, type:`, data.type || "candidate")
         socketRef.current?.emit("offer", {
           meetingId: id,
           callerId: socketId,
@@ -306,17 +320,42 @@ export default function MeetingRoom() {
         })
       })
 
+      peer.on("connect", () => {
+        console.log(`Connected to peer ${userId}`)
+      })
+
+      peer.on("error", (err) => {
+        console.error(`Peer error with ${userId}:`, err)
+      })
+
       peer.on("stream", (remoteStream) => {
-        console.log(`Received stream from ${userId}`)
-        setStreams((prev) => ({ ...prev, [userId]: remoteStream }))
+        console.log(
+          `Received stream from ${userId}:`,
+          remoteStream.id,
+          remoteStream.getTracks().map((t) => `${t.kind}:${t.enabled}`),
+        )
+
+        // Ensure we're updating state with the new stream
+        setStreams((prev) => {
+          // Only update if the stream isn't already in state or has changed
+          if (!prev[userId] || prev[userId].id !== remoteStream.id) {
+            console.log(`Adding stream from ${userId} to state`)
+            return { ...prev, [userId]: remoteStream }
+          }
+          return prev
+        })
       })
 
       // Add bandwidth estimation
       peer.on("data", (data) => {
-        const message = JSON.parse(data)
-        if (message.type === "bandwidth") {
-          bandwidthRef.current = message.value
-          updateConnectionQuality(message.value)
+        try {
+          const message = JSON.parse(data.toString())
+          if (message.type === "bandwidth") {
+            bandwidthRef.current = message.value
+            updateConnectionQuality(message.value)
+          }
+        } catch (err) {
+          console.error("Error parsing peer data:", err)
         }
       })
 
@@ -328,36 +367,59 @@ export default function MeetingRoom() {
   // Function to add a peer when receiving an offer
   const addPeer = useCallback(
     (incomingSignal: SignalData, callerId: string, stream: MediaStream) => {
-      console.log(`Adding peer for ${callerId}`)
+      console.log(`Adding peer for ${callerId}, signal type:`, incomingSignal.type || "candidate")
       const peer = new Peer({
         initiator: false,
-        trickle: false,
+        trickle: true, // Change to true to use ICE trickle for faster connections
         stream,
         config: peerConfig,
       })
 
       peer.on("signal", (data) => {
-        console.log(`Sending answer to ${callerId}`)
+        console.log(`Sending answer to ${callerId}, type:`, data.type || "candidate")
         socketRef.current?.emit("answer", { meetingId: id, callerId, answer: data })
       })
 
+      peer.on("connect", () => {
+        console.log(`Connected to peer ${callerId}`)
+      })
+
+      peer.on("error", (err) => {
+        console.error(`Peer error with ${callerId}:`, err)
+      })
+
       peer.on("stream", (remoteStream) => {
-        console.log(`Received stream from ${callerId}`, remoteStream)
-        // Make sure we're updating state with a valid stream
-        if (remoteStream && remoteStream.id) {
-          setStreams((prev) => ({ ...prev, [callerId]: remoteStream }))
-        }
+        console.log(
+          `Received stream from ${callerId}:`,
+          remoteStream.id,
+          remoteStream.getTracks().map((t) => `${t.kind}:${t.enabled}`),
+        )
+
+        // Ensure we're updating state with the new stream
+        setStreams((prev) => {
+          // Only update if the stream isn't already in state or has changed
+          if (!prev[callerId] || prev[callerId].id !== remoteStream.id) {
+            console.log(`Adding stream from ${callerId} to state`)
+            return { ...prev, [callerId]: remoteStream }
+          }
+          return prev
+        })
       })
 
       // Add bandwidth estimation
       peer.on("data", (data) => {
-        const message = JSON.parse(data)
-        if (message.type === "bandwidth") {
-          bandwidthRef.current = message.value
-          updateConnectionQuality(message.value)
+        try {
+          const message = JSON.parse(data.toString())
+          if (message.type === "bandwidth") {
+            bandwidthRef.current = message.value
+            updateConnectionQuality(message.value)
+          }
+        } catch (err) {
+          console.error("Error parsing peer data:", err)
         }
       })
 
+      // Signal the incoming offer to establish the connection
       peer.signal(incomingSignal)
       return peer
     },
@@ -459,6 +521,23 @@ export default function MeetingRoom() {
     return () => clearInterval(interval)
   }, [adjustVideoQuality])
 
+  const monitorPeerConnection = (peer: Peer.Instance, userId: string) => {
+    const pc = (peer as unknown as Peer)._pc
+    if (pc) {
+      pc.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state with ${userId}:`, pc.iceConnectionState)
+        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+          console.warn(`ICE connection failed with ${userId}, attempting restart`)
+          pc.restartIce()
+        }
+      }
+
+      pc.onconnectionstatechange = () => {
+        console.log(`Connection state with ${userId}:`, pc.connectionState)
+      }
+    }
+  }
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Meeting header */}
@@ -528,7 +607,7 @@ export default function MeetingRoom() {
 
               {/* Remote videos */}
               {Object.entries(streams).map(([userId, stream]) => {
-                console.log(`Rendering stream for ${userId}:`, stream)
+                console.log(`Rendering stream for ${userId}:`, stream.id, stream.getTracks().length)
                 return (
                   <Card key={userId} className="relative overflow-hidden">
                     {audioOnlyMode ? (
@@ -545,10 +624,18 @@ export default function MeetingRoom() {
                         className="w-full h-full object-cover"
                         ref={(el) => {
                           if (el) {
-                            console.log(`Setting srcObject for ${userId}`)
+                            console.log(
+                              `Setting srcObject for ${userId}`,
+                              stream.getTracks().map((t) => `${t.kind}:${t.enabled}`),
+                            )
                             el.srcObject = stream
                             // Ensure video plays
-                            el.play().catch((err) => console.error(`Error playing video for ${userId}:`, err))
+                            el.play().catch((err) => {
+                              console.error(`Error playing video for ${userId}:`, err)
+                              // Try again with muted attribute which browsers allow without user interaction
+                              el.muted = true
+                              el.play().catch((err2) => console.error(`Error playing muted video for ${userId}:`, err2))
+                            })
                           }
                         }}
                       />
