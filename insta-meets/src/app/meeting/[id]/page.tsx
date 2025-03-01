@@ -45,6 +45,10 @@ interface Streams {
   [key: string]: MediaStream
 }
 
+interface Peer {
+  _pc: RTCPeerConnection;
+  signal: (signalData: SignalData) => void;
+}
 interface ParticipantMap {
   [key: string]: string
 }
@@ -121,7 +125,7 @@ export default function MeetingRoom() {
           })
           // Create a new peer connection only if one does not exist.
           if (!peersRef.current[userId]) {
-            const peer = createPeer(userId, socketConnection.id, stream)
+            const peer = createPeer(userId, socketConnection.id ?? "", stream)
             peersRef.current[userId] = peer
             setPeers((prev) => ({ ...prev, [userId]: peer }))
           }
@@ -162,9 +166,9 @@ export default function MeetingRoom() {
 
         // Handle answer with stable state checking
         socketConnection.on("answer", (data: { answer: SignalData; callerId: string }) => {
-          const peer = peersRef.current[data.callerId]
+          const peer = peersRef.current[data.callerId] as unknown as Peer
           if (peer) {
-            const pc = (peer as any)._pc
+            const pc = peer._pc
             // Only signal the answer if the underlying RTCPeerConnection is in "have-local-offer" state.
             if (pc && pc.signalingState === "have-local-offer") {
               console.log(`Setting remote answer for ${data.callerId}`)
@@ -593,7 +597,7 @@ export default function MeetingRoom() {
                   const videoTrack = stream.getVideoTracks()[0]
 
                   Object.values(peersRef.current).forEach((peer) => {
-                    const sender = peer.getSenders().find((s) => s.track?.kind === "video")
+                   const sender = (peer as unknown as RTCPeerConnection).getSenders().find((s) => s.track?.kind === "video")
                     if (sender) {
                       sender.replaceTrack(videoTrack)
                     }
@@ -603,7 +607,7 @@ export default function MeetingRoom() {
                     if (localStream) {
                       const originalVideoTrack = localStream.getVideoTracks()[0]
                       Object.values(peersRef.current).forEach((peer) => {
-                        const sender = peer.getSenders().find((s) => s.track?.kind === "video")
+                        const sender = (peer as unknown as RTCPeerConnection).getSenders().find((s) => s.track?.kind === "video")
                         if (sender) {
                           sender.replaceTrack(originalVideoTrack)
                         }
