@@ -3,6 +3,7 @@ import http from "http";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import { Server } from "socket.io";
+import cors from "cors"
 
 dotenv.config();
 
@@ -31,7 +32,11 @@ const meetingSchema = new mongoose.Schema(
 );
 const Meeting = mongoose.model("Meeting", meetingSchema);
 
-const app = express();
+app.use(cors({
+  origin: FRONTEND_URL,
+  methods: ["GET", "POST"],
+}));
+
 app.use(express.json());
 
 // Test route to see saved meetings
