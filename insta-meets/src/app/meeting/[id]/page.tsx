@@ -109,6 +109,7 @@ export default function MeetingRoom() {
           reconnectionDelay: 1000,
           timeout: 10000,
           transports: ["websocket", "polling"],
+          reconnection: true,
         });
         socketRef.current = socketConnection;
         setSocket(socketConnection);
