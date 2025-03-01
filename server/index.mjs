@@ -57,7 +57,7 @@ const io = new Server(server, {
 // Use an in-memory map to track active users per meeting
 const activeUsers = new Map();
 
-io.on("connection", (socket) => {
+io.on("connect", (socket) => {
   console.log("Socket connected:", socket.id);
 
   socket.on('ping', (data) => {
