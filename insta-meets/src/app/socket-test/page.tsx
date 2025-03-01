@@ -10,9 +10,10 @@ export default function SocketTestPage() {
   const [socket, setSocket] = useState<Socket | null>(null)
   const [connectionStatus, setConnectionStatus] = useState("Disconnected")
   const [lastPong, setLastPong] = useState<string | null>(null)
+  const [serverHealth, setServerHealth] = useState<string>("Checking...")
 
   const connectSocket = () => {
-    const newSocket = io(process.env.BACKEND_URL, {
+    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000", {
       transports: ["websocket", "polling"],
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
@@ -43,7 +44,24 @@ export default function SocketTestPage() {
     setSocket(newSocket)
   }
 
+  const checkServerHealth = async () => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000"}/api/health`)
+      if (response.ok) {
+        const data = await response.json()
+        setServerHealth(data.status === "ok" ? "Server is healthy" : "Server not healthy")
+      } else {
+        setServerHealth("Server is down")
+      }
+    } catch (error) {
+      console.error("Health check failed:", error)
+      setServerHealth("Server is down")
+    }
+  }
+
   useEffect(() => {
+    checkServerHealth()
+
     return () => {
       if (socket) {
         socket.disconnect()
@@ -76,6 +94,9 @@ export default function SocketTestPage() {
               <strong>Last Pong:</strong> {lastPong}
             </div>
           )}
+          <div>
+            <strong>Server Health:</strong> {serverHealth}
+          </div>
         </CardContent>
         <CardFooter className="flex justify-between">
           <Button onClick={connectSocket} disabled={connectionStatus === "Connected"}>
@@ -89,4 +110,3 @@ export default function SocketTestPage() {
     </div>
   )
 }
-
