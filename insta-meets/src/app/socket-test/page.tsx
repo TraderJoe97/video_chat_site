@@ -12,7 +12,7 @@ export default function SocketTestPage() {
   const [lastPong, setLastPong] = useState<string | null>(null)
 
   const connectSocket = () => {
-    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000", {
+    const newSocket = io(process.env.BACKEND_URL, {
       transports: ["websocket", "polling"],
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
