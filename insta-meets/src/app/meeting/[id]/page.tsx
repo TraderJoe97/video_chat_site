@@ -53,11 +53,6 @@ interface ParticipantMap {
   [key: string]: string
 }
 
-interface PeerConfig {
-  iceServers: RTCIceServer[]
-  sdpSemantics: "unified-plan" | "plan-b"
-  iceTransportPolicy: RTCIceTransportPolicy
-}
 
 export default function MeetingRoom() {
   const { id } = useParams<{ id: string }>()
@@ -277,27 +272,6 @@ export default function MeetingRoom() {
     }
   }, [connectionQuality, audioOnlyMode, localStream])
 
-  const peerConfig: PeerConfig = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:global.stun.twilio.com:3478" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun2.l.google.com:19302" },
-      // Add these free TURN servers (consider replacing with your own in production)
-      {
-        urls: "turn:openrelay.metered.ca:80",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-      {
-        urls: "turn:openrelay.metered.ca:443",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-    ],
-    sdpSemantics: "unified-plan",
-    iceTransportPolicy: "all",
-  }
 
   // Function to create a new peer (initiator)
   const createPeer = useCallback(
@@ -307,7 +281,6 @@ export default function MeetingRoom() {
         initiator: true,
         trickle: true, // Change to true to use ICE trickle for faster connections
         stream,
-        config: peerConfig,
       })
 
       peer.on("signal", (data) => {
@@ -372,7 +345,6 @@ export default function MeetingRoom() {
         initiator: false,
         trickle: true, // Change to true to use ICE trickle for faster connections
         stream,
-        config: peerConfig,
       })
 
       peer.on("signal", (data) => {
