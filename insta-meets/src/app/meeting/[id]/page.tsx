@@ -108,6 +108,7 @@ export default function MeetingRoom() {
           reconnectionAttempts: 5,
           reconnectionDelay: 1000,
           timeout: 10000,
+          transports: ["websocket", "polling"],
         });
         socketRef.current = socketConnection;
         setSocket(socketConnection);
@@ -124,10 +125,13 @@ export default function MeetingRoom() {
             socketConnection.id
           );
           socketConnection.emit("join-room", {
-  meetingId: id,
-  userId: userIdRef.current,
-  username: user?.name
-});
+            meetingId: id,
+            userId: userIdRef.current,
+            username: user?.name,
+          });
+        });
+        socketConnection.on("connect_error", (error) => {
+          console.error("Socket connection error:", error);
         });
 
         // Prevent duplicate participants by checking if the user is already in the list
