@@ -1,6 +1,4 @@
-
 "use client";
-
 import { useEffect, useState, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useAuth0 } from "@auth0/auth0-react";
@@ -190,28 +188,22 @@ export default function MeetingRoom() {
 
   // Create a peer (initiator)
   const createPeer = (userId: string, socketId: string, stream: MediaStream) => {
-    console.log("Creating peer for:", userId);
+    console.log(`Creating peer for ${userId}`);
     const peer = new Peer({
       initiator: true,
       trickle: false,
       stream,
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // Added STUN server
     });
 
     peer.on("signal", (data) => {
-      socketRef.current?.emit("offer", {
-        meetingId: id,
-        callerId: socketId,
-        userId,
-        offer: data,
-      });
+      console.log(`Sending offer to ${userId}`);
+      socketRef.current?.emit("offer", { meetingId: id, callerId: socketId, userId, offer: data });
     });
 
     peer.on("stream", (remoteStream) => {
-      console.log("Received stream from:", userId);
-      setStreams((prevStreams) => ({
-        ...prevStreams,
-        [userId]: remoteStream,
-      }));
+      console.log(`Received stream from ${userId}`);
+      setStreams((prevStreams) => ({ ...prevStreams, [userId]: remoteStream }));
     });
 
     return peer;
@@ -219,27 +211,22 @@ export default function MeetingRoom() {
 
   // Add a peer (receiver)
   const addPeer = (incomingSignal: SignalData, callerId: string, stream: MediaStream) => {
-    console.log("Adding peer for:", callerId);
+    console.log(`Adding peer for ${callerId}`);
     const peer = new Peer({
       initiator: false,
       trickle: false,
       stream,
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // Added STUN server
     });
 
     peer.on("signal", (data) => {
-      socketRef.current?.emit("answer", {
-        meetingId: id,
-        callerId,
-        answer: data,
-      });
+      console.log(`Sending answer to ${callerId}`);
+      socketRef.current?.emit("answer", { meetingId: id, callerId, answer: data });
     });
 
     peer.on("stream", (remoteStream) => {
-      console.log("Received stream from:", callerId);
-      setStreams((prevStreams) => ({
-        ...prevStreams,
-        [callerId]: remoteStream,
-      }));
+      console.log(`Received stream from ${callerId}`);
+      setStreams((prevStreams) => ({ ...prevStreams, [callerId]: remoteStream }));
     });
 
     peer.signal(incomingSignal);
