@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef, useCallback } from "react"
+import { useEffect, useState, useRef, useCallback} from "react"
 import { useParams, useSearchParams } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
 import Peer from "simple-peer"
@@ -86,7 +86,7 @@ export default function MeetingPage() {
     [socket],
   )
 
-  const addStreamToPeers = (userId: string, stream: MediaStream) => {
+  const addStreamToPeers = useCallback((userId: string, stream: MediaStream) => {
     setPeers((prevPeers) => {
       const updatedPeer = prevPeers[userId] as Peer.Instance
       if (updatedPeer) {
@@ -95,7 +95,7 @@ export default function MeetingPage() {
       }
       return prevPeers
     })
-  }
+  }, [])
 
   useEffect(() => {
     if (!isAuthenticated && !searchParams.get("name")) {
