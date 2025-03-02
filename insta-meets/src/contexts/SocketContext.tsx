@@ -19,7 +19,11 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
-    const newSocket = io(process.env.BACKEND_URL, {
+    // Use the correct environment variable name
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000"
+    console.log("Connecting to socket server at:", backendUrl)
+
+    const newSocket = io(backendUrl, {
       transports: ["websocket", "polling"],
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
@@ -28,6 +32,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     newSocket.on("connect", () => {
       setIsConnected(true)
+      console.log("Socket connected with ID:", newSocket.id)
       toast.success("Connected to server")
     })
 
@@ -42,6 +47,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     })
 
     setSocket(newSocket)
+
+    // Make socket available globally for peer connections
+    window.socketRef = { current: newSocket }
 
     return () => {
       newSocket.disconnect()
