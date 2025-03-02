@@ -143,17 +143,28 @@ io.on("connect", (socket) => {
       offer: data.offer,
     });
   });
+
   socket.on("answer", (data) => {
     console.log(`Answer from ${data.callerId} in meeting ${data.meetingId}`);
-    socket
-      .to(data.callerId)
-      .emit("answer", { callerId: data.callerId, answer: data.answer });
+    socket.to(data.callerId).emit("answer", {
+      callerId: data.callerId,
+      answer: data.answer,
+    });
   });
+
   socket.on("candidate", (data) => {
     console.log(`Candidate from ${data.callerId} in meeting ${data.meetingId}`);
     socket.to(data.callerId).emit("candidate", {
       callerId: data.callerId,
       candidate: data.candidate,
+    });
+  });
+
+  socket.on("stream", (data) => {
+    console.log(`Stream from ${data.userId} in meeting ${data.meetingId}`);
+    socket.to(data.meetingId).emit("stream", {
+      userId: data.userId,
+      stream: data.stream,
     });
   });
 
