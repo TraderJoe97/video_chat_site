@@ -197,7 +197,7 @@ export default function MeetingPage() {
         peer.destroy()
       })
     }
-  }, [localStream])
+  }, [])
 
   useEffect(() => {
     if (!socket || !isConnected || !localStream || !userIdRef.current) {
