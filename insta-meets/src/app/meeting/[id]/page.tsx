@@ -12,6 +12,18 @@ import { ParticipantsPanel } from "@/components/participants-panel"
 import { useMediaStream } from "@/hooks/use-media-stream"
 import { usePeerConnections } from "@/hooks/use-peer-connections"
 import { useSocketConnection } from "@/hooks/use-socket-connection"
+import { Socket } from "socket.io-client";
+
+interface SocketRef {
+  current: Socket;
+}
+
+declare global {
+  interface Window {
+    socketRef?: SocketRef;
+  }
+}
+
 
 export default function MeetingRoom() {
   const { id } = useParams<{ id: string }>()
@@ -40,7 +52,6 @@ export default function MeetingRoom() {
     toggleAudio,
     toggleVideo,
     adjustVideoQuality,
-    updateConnectionQuality,
   } = useMediaStream()
 
   const { peers, streams, peersRef, createPeer, addPeer, monitorPeerConnection } = usePeerConnections(
@@ -104,6 +115,9 @@ export default function MeetingRoom() {
   const leaveMeeting = () => {
     window.location.href = "/dashboard"
   }
+
+  // update connection quality
+
 
   return (
     <div className="flex flex-col h-screen bg-background">
