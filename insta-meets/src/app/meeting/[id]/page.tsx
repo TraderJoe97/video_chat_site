@@ -191,6 +191,9 @@ export default function MeetingPage() {
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream
         }
+
+        // Emit the local stream to the server
+        socket?.emit("stream", { stream, userId: userIdRef.current, meetingId: id })
       } catch (error) {
         console.error("Error accessing media devices:", error)
         toast.error("Could not access camera or microphone. Please check permissions.")
@@ -335,6 +338,19 @@ export default function MeetingPage() {
     updateParticipants,
   ])
 
+  useEffect(() => {
+    if (localStream && participants.length > 1) {
+      participants.forEach((participant) => {
+        if (participant.id !== userIdRef.current && !peersRef.current[participant.id]) {
+          const peer = createPeer(participant.id)
+          if (peer) {
+            peersRef.current[participant.id] = peer
+          }
+        }
+      })
+    }
+  }, [localStream, participants, createPeer])
+
   const toggleVideo = useCallback(() => {
     if (localStream) {
       const videoTrack = localStream.getVideoTracks()[0]
@@ -380,41 +396,41 @@ export default function MeetingPage() {
       <div className="flex flex-col items-center justify-center flex-1 p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="relative">
-        <video
-          ref={localVideoRef}
-          autoPlay
-          muted
-          className="h-[200px] w-[300px] rounded-lg shadow-lg object-cover"
-        />
-        <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
-          You ({user?.name || searchParams.get("name") || userIdRef.current})
-        </div>
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              className="h-[200px] w-[300px] rounded-lg shadow-lg object-cover"
+            />
+            <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
+              You ({user?.name || searchParams.get("name") || userIdRef.current})
+            </div>
           </div>
 
           {Object.entries(remoteStreams).map(([userId, stream]) => (
-        <div key={userId} className="relative">
-          <VideoComponent stream={stream} />
-          <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
-            {participants.find((p) => p.id === userId)?.name || userId}
-          </div>
-        </div>
+            <div key={userId} className="relative">
+              <VideoComponent stream={stream} />
+              <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
+                {participants.find((p) => p.id === userId)?.name || userId}
+              </div>
+            </div>
           ))}
         </div>
 
         <div className="flex flex-row justify-center mt-6 space-x-4">
           <Button
-        onClick={toggleVideo}
-        variant={isVideoEnabled ? "default" : "destructive"}
-        className="rounded-full h-12 w-12"
+            onClick={toggleVideo}
+            variant={isVideoEnabled ? "default" : "destructive"}
+            className="rounded-full h-12 w-12"
           >
-        {isVideoEnabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+            {isVideoEnabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
           </Button>
           <Button
-        onClick={toggleAudio}
-        variant={isAudioEnabled ? "default" : "destructive"}
-        className="rounded-full h-12 w-12"
+            onClick={toggleAudio}
+            variant={isAudioEnabled ? "default" : "destructive"}
+            className="rounded-full h-12 w-12"
           >
-        {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+            {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
           </Button>
         </div>
       </div>
@@ -431,4 +447,3 @@ export default function MeetingPage() {
     </div>
   )
 }
-
