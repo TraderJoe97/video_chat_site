@@ -10,6 +10,7 @@ import { Mic, MicOff, VideoIcon, VideoOff } from "lucide-react"
 import { ChatPanel } from "@/components/chat-panel"
 import { ParticipantsPanel } from "@/components/participants-panel"
 import { toast } from "sonner"
+import { VideoComponent } from "@/components/video-component"
 
 interface UserConnectedData {
   userId: string
@@ -392,13 +393,7 @@ export default function MeetingPage() {
 
           {Object.entries(remoteStreams).map(([userId, stream]) => (
             <div key={userId} className="relative">
-              <video
-                ref={(video) => {
-                  if (video) video.srcObject = stream
-                }}
-                autoPlay
-                className="h-[200px] w-[300px] rounded-lg shadow-lg object-cover"
-              />
+              <VideoComponent stream={stream} />
               <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
                 {participants.find((p) => p.id === userId)?.name || userId}
               </div>
