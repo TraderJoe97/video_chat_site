@@ -351,7 +351,7 @@ export default function MeetingPage() {
     }
   }, [localStream, participants, createPeer])
 
-  const toggleVideo = useCallback(() => {
+  const toggleVideo =() => {
     if (localStream) {
       const videoTrack = localStream.getVideoTracks()[0]
       if (videoTrack) {
@@ -359,9 +359,9 @@ export default function MeetingPage() {
         setLocalStream(localStream.clone())
       }
     }
-  }, [localStream])
+  }
 
-  const toggleAudio = useCallback(() => {
+  const toggleAudio = () => {
     if (localStream) {
       const audioTrack = localStream.getAudioTracks()[0]
       if (audioTrack) {
@@ -369,7 +369,7 @@ export default function MeetingPage() {
         setLocalStream(localStream.clone())
       }
     }
-  }, [localStream])
+  }
 
   const sendMessage = useCallback(
     (text: string) => {
