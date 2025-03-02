@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef, useCallback} from "react"
+import { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { useParams, useSearchParams } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
 import Peer from "simple-peer"
@@ -44,6 +44,7 @@ export default function MeetingPage() {
   const [peers, setPeers] = useState<Record<string, Peer.Instance>>({})
   const [messages, setMessages] = useState<Message[]>([])
   const [participants, setParticipants] = useState<Participant[]>([])
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({})
   const peersRef = useRef<Record<string, Peer.Instance>>({})
   const userIdRef = useRef<string>("")
 
@@ -66,7 +67,10 @@ export default function MeetingPage() {
       })
 
       peer.on("stream", (remoteStream: MediaStream) => {
-        addStreamToPeers(userId, remoteStream)
+        setRemoteStreams((prevStreams) => ({
+          ...prevStreams,
+          [userId]: remoteStream,
+        }))
       })
 
       peer.on("error", (err: Error) => {
@@ -78,6 +82,11 @@ export default function MeetingPage() {
           const newPeers = { ...prevPeers }
           delete newPeers[userId]
           return newPeers
+        })
+        setRemoteStreams((prevStreams) => {
+          const newStreams = { ...prevStreams }
+          delete newStreams[userId]
+          return newStreams
         })
       })
 
@@ -95,6 +104,9 @@ export default function MeetingPage() {
       }
       return prevPeers
     })
+    if (localStream) {
+      addStreamToPeers(userId, localStream);
+    }
   }, [])
 
   useEffect(() => {
@@ -146,6 +158,11 @@ export default function MeetingPage() {
               return newPeers
             })
             setParticipants((prev) => prev.filter((p) => p.id !== userId))
+            setRemoteStreams((prevStreams) => {
+              const newStreams = { ...prevStreams }
+              delete newStreams[userId]
+              return newStreams
+            })
           })
 
           socket.on("chatMessage", (message: Message) => {
@@ -172,9 +189,9 @@ export default function MeetingPage() {
         socket.off("chatMessage")
       }
     }
-  }, [id, isAuthenticated, searchParams, user, createPeer, socket, isConnected, localStream])
+  }, [id, isAuthenticated, searchParams, user, createPeer, socket, isConnected])
 
-  const muteVideo = (userId: string) => {
+  const muteVideo = useCallback((userId: string) => {
     const peer = peers[userId]
     if (peer && peer.streams[0]) {
       const videoTrack = peer.streams[0].getVideoTracks()[0]
@@ -182,9 +199,9 @@ export default function MeetingPage() {
         videoTrack.enabled = !videoTrack.enabled
       }
     }
-  }
+  }, [peers])
 
-  const muteAudio = (userId: string) => {
+  const muteAudio = useCallback((userId: string) => {
     const peer = peers[userId]
     if (peer && peer.streams[0]) {
       const audioTrack = peer.streams[0].getAudioTracks()[0]
@@ -192,24 +209,46 @@ export default function MeetingPage() {
         audioTrack.enabled = !audioTrack.enabled
       }
     }
-  }
+  }, [peers])
+
+  const videoButton = useMemo(() => (
+    <Button onClick={() => muteVideo(userIdRef.current)} className="rounded-full h-12 w-12">
+      {localStream?.getVideoTracks()[0]?.enabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+    </Button>
+  ), [localStream, muteVideo])
+
+  const audioButton = useMemo(() => (
+    <Button onClick={() => muteAudio(userIdRef.current)} className="rounded-full h-12 w-12">
+      {localStream?.getAudioTracks()[0]?.enabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+    </Button>
+  ), [localStream, muteAudio])
 
   return (
     <div className="flex flex-col h-screen w-screen">
       <div className="flex flex-col items-center justify-center flex-1 p-4">
         <video ref={localVideoRef} autoPlay muted className="h-[200px] w-[200px] md:h-[300px] md:w-[300px] rounded-lg shadow-lg" />
         <div className="flex flex-row justify-between mt-4 space-x-2">
-          <Button onClick={() => muteVideo(userIdRef.current)} className="rounded-full h-12 w-12">
-            {localStream?.getVideoTracks()[0]?.enabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-          </Button>
-          <Button onClick={() => muteAudio(userIdRef.current)} className="rounded-full h-12 w-12">
-            {localStream?.getAudioTracks()[0]?.enabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
-          </Button>
+          {videoButton}
+          {audioButton}
         </div>
       </div>
       <div className="flex flex-col md:flex-row h-full">
-        <ParticipantsPanel participants={participants} />
-        <ChatPanel messages={messages} currentUser={userIdRef.current} meetingId={id} />
+        <ParticipantsPanel participants={participants}  />
+        <ChatPanel messages={messages} currentUser={userIdRef.current} meetingId={id}  />
+      </div>
+      <div className="flex flex-wrap justify-center p-4">
+        {Object.entries(remoteStreams).map(([userId, stream]) => (
+          <video
+            key={userId}
+            ref={(video) => {
+              if (video) {
+                video.srcObject = stream;
+              }
+            }}
+            autoPlay
+            className="h-[200px] w-[200px] md:h-[300px] md:w-[300px] rounded-lg shadow-lg m-2"
+          />
+        ))}
       </div>
     </div>
   )
