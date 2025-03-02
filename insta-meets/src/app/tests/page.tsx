@@ -255,7 +255,7 @@ export default function TestPage() {
         </CardHeader>
         <CardContent>
           <div>
-            <strong>BACKEND_URL:</strong> {process.env.NEXT_PUBLIC_BACKEND_URL || "Not set"}
+            <strong>BACKEND_URL:</strong> {process.env.BACKEND_URL || "Not set"}
           </div>
         </CardContent>
       </Card>
