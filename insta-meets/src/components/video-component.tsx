@@ -12,7 +12,7 @@ export const VideoComponent: React.FC<VideoComponentProps> = ({ stream }) => {
 
   useEffect(() => {
     if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream
+      videoRef.current!.srcObject = stream
     }
   }, [stream])
 
