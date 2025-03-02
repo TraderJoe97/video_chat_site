@@ -93,7 +93,170 @@ export default function MeetingRoom() {
     monitorPeerConnection,
   })
 
+<<<<<<< HEAD
   // Make socket available globally for peer connections
+=======
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      })
+      setLocalStream(stream)
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+
+      const socketConnection = io(process.env.NEXT_PUBLIC_BACKEND_URL || "", {
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 10000,
+        transports: ["websocket", "polling"],
+        reconnection: true,
+      })
+
+      socketRef.current = socketConnection
+      setSocket(socketConnection)
+      socketInitializedRef.current = true
+
+      // Register socket events once:
+      socketConnection.on("connect", () => {
+        console.log("Connected to socket server with ID:", socketConnection.id)
+        socketConnection.emit("join-room", {
+          meetingId: id,
+          userId: userIdRef.current,
+          username: isAuthenticated ? user?.name : userIdRef.current,
+        })
+      })
+
+      socketConnection.on("connect_error", (error) => {
+        console.error("Socket connection error:", error)
+        toast.error("Failed to connect to the meeting server")
+      })
+
+      // Prevent duplicate participants by checking if the user is already in the list
+      socketConnection.on("user-connected", ({ userId, username }) => {
+        console.log("User connected:", userId, username)
+        setParticipants((prev) => {
+          if (prev.some((p) => p.id === userId)) return prev
+          return [...prev, { id: userId, name: username || userId }]
+        })
+
+        // Update participant names mapping
+        setParticipantNames((prev) => ({
+          ...prev,
+          [userId]: username || userId,
+        }))
+
+        // Create a new peer connection only if one does not exist.
+        if (!peersRef.current[userId]) {
+          const peer = createPeer(userId, socketConnection.id ?? "", stream)
+          peersRef.current[userId] = peer
+          setPeers((prev) => ({ ...prev, [userId]: peer }))
+          monitorPeerConnection(peer, userId)
+        }
+      })
+
+      socketConnection.on("user-disconnected", (userId) => {
+        console.log("User disconnected:", userId)
+        setParticipants((prev) => prev.filter((p) => p.id !== userId))
+        if (peersRef.current[userId]) {
+          peersRef.current[userId].destroy()
+          delete peersRef.current[userId]
+          setPeers((prev) => {
+            const updated = { ...prev }
+            delete updated[userId]
+            return updated
+          })
+          setStreams((prev) => {
+            const updated = { ...prev }
+            delete updated[userId]
+            return updated
+          })
+        }
+      })
+
+      socketConnection.on("createMessage", (message: Message) => {
+        // Only add the message if it's not from the current user or doesn't have the isFromMe flag
+        if (message.sender !== userIdRef.current || !message.isFromMe) {
+          setMessages((prev) => [...prev, message])
+        }
+      })
+
+      // Handle offer event: when another user initiates a call.
+      socketConnection.on("offer", (data: { offer: SignalData; callerId: string; userId: string }) => {
+        console.log(`Received offer from ${data.callerId}`)
+        // Only process if the offer is for this user
+        if (data.userId === userIdRef.current) {
+          const peer = addPeer(data.offer, data.callerId, stream)
+          peersRef.current[data.callerId] = peer
+          setPeers((prev) => ({ ...prev, [data.callerId]: peer }))
+          monitorPeerConnection(peer, data.callerId)
+        }
+      })
+
+      // Handle answer with stable state checking
+      socketConnection.on("answer", (data: { answer: SignalData; callerId: string }) => {
+        const peer = peersRef.current[data.callerId] as unknown as Peer
+        if (peer) {
+          const pc = peer._pc
+          // Only signal the answer if the underlying RTCPeerConnection is in "have-local-offer" state.
+          if (pc && pc.signalingState === "have-local-offer") {
+            console.log(`Setting remote answer for ${data.callerId}`)
+            peer.signal(data.answer)
+          } else {
+            console.warn(`Answer from ${data.callerId} ignored (signalingState: ${pc ? pc.signalingState : "unknown"})`)
+          }
+        }
+      })
+
+      // Handle ICE candidates
+      socketConnection.on("candidate", (data: { candidate: SignalData; callerId: string }) => {
+        if (peersRef.current[data.callerId]) {
+          peersRef.current[data.callerId].signal(data.candidate)
+        }
+      })
+
+      socketConnection.on("existing-participants", (participants: Array<{ userId: string; username: string }>) => {
+        console.log("Existing participants:", participants)
+
+        // Update participants state
+        setParticipants((prev) => {
+          const newParticipants = [...prev]
+
+          participants.forEach(({ userId, username }) => {
+            if (!newParticipants.some((p) => p.id === userId)) {
+              newParticipants.push({
+                id: userId,
+                name: username || userId,
+              })
+            }
+          })
+
+          return newParticipants
+        })
+
+        // Update participant names mapping
+        const namesMap: ParticipantMap = {}
+        participants.forEach(({ userId, username }) => {
+          namesMap[userId] = username || userId
+        })
+
+        setParticipantNames((prev) => ({
+          ...prev,
+          ...namesMap,
+        }))
+      })
+
+      setIsConnecting(false)
+    } catch (error) {
+      console.error("Error initializing meeting:", error)
+      toast.error("Could not access camera or microphone. Please check permissions.")
+      setIsConnecting(false)
+    }
+  }, [id, user, isAuthenticated])
+
+  // Initialize connection after name is set
+>>>>>>> parent of 8eb4594 (install dialog component)
   useEffect(() => {
     if (socket) {
       window.socketRef = { current: socket }
