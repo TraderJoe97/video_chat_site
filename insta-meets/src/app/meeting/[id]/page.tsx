@@ -195,20 +195,22 @@ export default function MeetingPage() {
   }
 
   return (
-    <div className="flex h-screen w-screen">
-      <div className="flex flex-col flex-1">
-        <video ref={localVideoRef} autoPlay muted className="h-[300px] w-[300px]" />
-        <div className="flex flex-row justify-between">
-          <Button onClick={() => muteVideo(userIdRef.current)}>
-            {localStream?.getVideoTracks()[0]?.enabled ? <VideoIcon /> : <VideoOff />}
+    <div className="flex flex-col h-screen w-screen">
+      <div className="flex flex-col items-center justify-center flex-1 p-4">
+        <video ref={localVideoRef} autoPlay muted className="h-[200px] w-[200px] md:h-[300px] md:w-[300px] rounded-lg shadow-lg" />
+        <div className="flex flex-row justify-between mt-4 space-x-2">
+          <Button onClick={() => muteVideo(userIdRef.current)} className="rounded-full h-12 w-12">
+            {localStream?.getVideoTracks()[0]?.enabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
           </Button>
-          <Button onClick={() => muteAudio(userIdRef.current)}>
-            {localStream?.getAudioTracks()[0]?.enabled ? <Mic /> : <MicOff />}
+          <Button onClick={() => muteAudio(userIdRef.current)} className="rounded-full h-12 w-12">
+            {localStream?.getAudioTracks()[0]?.enabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
           </Button>
         </div>
       </div>
-      <ParticipantsPanel participants={participants} />
-      <ChatPanel messages={messages} currentUser={userIdRef.current} meetingId={id} />
+      <div className="flex flex-col md:flex-row h-full">
+        <ParticipantsPanel participants={participants} />
+        <ChatPanel messages={messages} currentUser={userIdRef.current} meetingId={id} />
+      </div>
     </div>
   )
 }
