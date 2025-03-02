@@ -1,5 +1,3 @@
-
-
 "use client"
 
 import { useEffect, useState, useRef, useCallback } from "react"
@@ -93,7 +91,7 @@ export default function MeetingPage() {
       const peer = new Peer({
         initiator: true,
         trickle: false,
-        stream: localStream,
+        stream: localStream, // This is where we add the local stream
       })
 
       peer.on("signal", (data: Peer.SignalData) => {
@@ -107,7 +105,8 @@ export default function MeetingPage() {
       })
 
       peer.on("stream", (remoteStream: MediaStream) => {
-        console.log(`Received stream from ${userId}`)
+        console.log(`Received stream from ${userId}`, remoteStream)
+        console.log("Stream tracks:", remoteStream.getTracks())
         setRemoteStreams((prevStreams) => ({
           ...prevStreams,
           [userId]: remoteStream,
@@ -145,7 +144,7 @@ export default function MeetingPage() {
       const peer = new Peer({
         initiator: false,
         trickle: false,
-        stream: localStream,
+        stream: localStream, // This is where we add the local stream
       })
 
       peer.on("signal", (data: Peer.SignalData) => {
@@ -158,7 +157,8 @@ export default function MeetingPage() {
       })
 
       peer.on("stream", (remoteStream: MediaStream) => {
-        console.log(`Received stream from ${callerId}`)
+        console.log(`Received stream from ${callerId}`, remoteStream)
+        console.log("Stream tracks:", remoteStream.getTracks())
         setRemoteStreams((prevStreams) => ({
           ...prevStreams,
           [callerId]: remoteStream,
