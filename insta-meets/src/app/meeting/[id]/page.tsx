@@ -206,13 +206,9 @@ export default function MeetingPage() {
 
     console.log("Setting up socket event listeners")
 
-    socket.emit("join-room", {
-      meetingId: id,
-      userId: userIdRef.current,
-      username: user?.name || searchParams.get("name") || userIdRef.current,
-    })
+    const hostId = isAuthenticated && user?.sub ? user.sub : userIdRef.current
 
-    socket.on("user-connected", (data: UserConnectedData) => {
+    const handleUserConnected = (data: UserConnectedData) => {
       console.log("User connected:", data)
       const { userId, username } = data
 
@@ -231,9 +227,9 @@ export default function MeetingPage() {
           })
         }
       }
-    })
+    }
 
-    socket.on("offer", (data: SignalData) => {
+    const handleOffer = (data: SignalData) => {
       console.log("Offer received:", data.callerId, data.offer)
       if (data.offer && data.callerId !== userIdRef.current) {
         if (!peersRef.current[data.callerId]) {
@@ -245,23 +241,23 @@ export default function MeetingPage() {
           }
         }
       }
-    })
+    }
 
-    socket.on("answer", (data: SignalData) => {
+    const handleAnswer = (data: SignalData) => {
       console.log("Answer received:", data.callerId, data.answer)
       if (data.answer && peersRef.current[data.callerId]) {
         peersRef.current[data.callerId].signal(data.answer)
       }
-    })
+    }
 
-    socket.on("candidate", (data: SignalData) => {
+    const handleCandidate = (data: SignalData) => {
       console.log("Candidate received:", data.callerId, data.candidate)
       if (data.candidate && peersRef.current[data.callerId]) {
         peersRef.current[data.callerId].signal({ type: "candidate", candidate: data.candidate })
       }
-    })
+    }
 
-    socket.on("user-disconnected", (userId: string) => {
+    const handleUserDisconnected = (userId: string) => {
       console.log("User disconnected:", userId)
 
       if (peersRef.current[userId]) {
@@ -276,14 +272,14 @@ export default function MeetingPage() {
         delete newStreams[userId]
         return newStreams
       })
-    })
+    }
 
-    socket.on("createMessage", (message: Message) => {
+    const handleCreateMessage = (message: Message) => {
       console.log("Chat message received:", message)
       setMessages((prev) => [...prev, message])
-    })
+    }
 
-    socket.on("existing-participants", (existingParticipants: Array<{ userId: string; username: string }>) => {
+    const handleExistingParticipants = (existingParticipants: Array<{ userId: string; username: string }>) => {
       console.log("Existing participants:", existingParticipants)
 
       setParticipants((prev) => {
@@ -298,18 +294,33 @@ export default function MeetingPage() {
 
         return newParticipants
       })
+    }
+
+    socket.emit("join-room", {
+      meetingId: id,
+      userId: userIdRef.current,
+      username: user?.name || searchParams.get("name") || userIdRef.current,
+      hostId: hostId,
     })
 
+    socket.on("user-connected", handleUserConnected)
+    socket.on("offer", handleOffer)
+    socket.on("answer", handleAnswer)
+    socket.on("candidate", handleCandidate)
+    socket.on("user-disconnected", handleUserDisconnected)
+    socket.on("createMessage", handleCreateMessage)
+    socket.on("existing-participants", handleExistingParticipants)
+
     return () => {
-      socket.off("user-connected")
-      socket.off("offer")
-      socket.off("answer")
-      socket.off("candidate")
-      socket.off("user-disconnected")
-      socket.off("createMessage")
-      socket.off("existing-participants")
+      socket.off("user-connected", handleUserConnected)
+      socket.off("offer", handleOffer)
+      socket.off("answer", handleAnswer)
+      socket.off("candidate", handleCandidate)
+      socket.off("user-disconnected", handleUserDisconnected)
+      socket.off("createMessage", handleCreateMessage)
+      socket.off("existing-participants", handleExistingParticipants)
     }
-  }, [socket, isConnected, localStream, id, user, searchParams, createPeer, addPeer])
+  }, [socket, isConnected, localStream, id, isAuthenticated, user, searchParams, createPeer, addPeer])
 
   const toggleVideo = useCallback(() => {
     if (localStream) {
