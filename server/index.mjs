@@ -50,6 +50,18 @@ app.get("/test-meetings", async (req, res) => {
   }
 });
 
+app.post("/create-meeting", async (req, res) => {
+  const { meetingId, hostId, meetingName } = req.body;
+  try {
+    const newMeeting = new Meeting({ meetingId, hostId, meetingName });
+    await newMeeting.save();
+    res.status(201).json(newMeeting);
+  } catch (error) {
+    console.error("Error creating meeting:", error);
+    res.status(500).json({ error: "Failed to create meeting" });
+  }
+});
+
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "ok", message: "Server is running" });
 });
@@ -125,7 +137,7 @@ io.on("connect", (socket) => {
     console.log(
       `Offer from ${data.callerId} for ${data.userId} in meeting ${data.meetingId}`
     );
-    socket.to(data.meetingId).emit("offer", {
+    socket.to(data.userId).emit("offer", {
       callerId: data.callerId,
       userId: data.userId,
       offer: data.offer,
@@ -134,12 +146,12 @@ io.on("connect", (socket) => {
   socket.on("answer", (data) => {
     console.log(`Answer from ${data.callerId} in meeting ${data.meetingId}`);
     socket
-      .to(data.meetingId)
+      .to(data.callerId)
       .emit("answer", { callerId: data.callerId, answer: data.answer });
   });
   socket.on("candidate", (data) => {
     console.log(`Candidate from ${data.callerId} in meeting ${data.meetingId}`);
-    socket.to(data.meetingId).emit("candidate", {
+    socket.to(data.callerId).emit("candidate", {
       callerId: data.callerId,
       candidate: data.candidate,
     });
