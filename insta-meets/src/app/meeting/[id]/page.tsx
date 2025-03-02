@@ -1,3 +1,5 @@
+
+
 "use client"
 
 import { useEffect, useState, useRef, useCallback } from "react"
@@ -47,6 +49,16 @@ export default function MeetingPage() {
   const peersRef = useRef<Record<string, Peer.Instance>>({})
   const userIdRef = useRef<string>("")
   const localVideoRef = useRef<HTMLVideoElement>(null)
+
+  const updateParticipants = useCallback((newParticipant: Participant) => {
+    setParticipants((prev) => {
+      const exists = prev.some((p) => p.id === newParticipant.id)
+      if (!exists) {
+        return [...prev, newParticipant]
+      }
+      return prev
+    })
+  }, [])
 
   useEffect(() => {
     if (isAuthenticated && user?.sub) {
@@ -218,13 +230,7 @@ export default function MeetingPage() {
 
         if (peer) {
           peersRef.current[userId] = peer
-
-          setParticipants((prev) => {
-            if (!prev.some((p) => p.id === userId)) {
-              return [...prev, { id: userId, name: username }]
-            }
-            return prev
-          })
+          updateParticipants({ id: userId, name: username })
         }
       }
     }
@@ -276,23 +282,18 @@ export default function MeetingPage() {
 
     const handleCreateMessage = (message: Message) => {
       console.log("Chat message received:", message)
-      setMessages((prev) => [...prev, message])
+      if (message.sender !== userIdRef.current) {
+        setMessages((prev) => [...prev, message])
+      }
     }
 
     const handleExistingParticipants = (existingParticipants: Array<{ userId: string; username: string }>) => {
       console.log("Existing participants:", existingParticipants)
 
-      setParticipants((prev) => {
-        const currentIds = prev.map((p) => p.id)
-        const newParticipants = [...prev]
-
-        existingParticipants.forEach(({ userId, username }) => {
-          if (!currentIds.includes(userId) && userId !== userIdRef.current) {
-            newParticipants.push({ id: userId, name: username })
-          }
-        })
-
-        return newParticipants
+      existingParticipants.forEach(({ userId, username }) => {
+        if (userId !== userIdRef.current) {
+          updateParticipants({ id: userId, name: username })
+        }
       })
     }
 
@@ -320,7 +321,18 @@ export default function MeetingPage() {
       socket.off("createMessage", handleCreateMessage)
       socket.off("existing-participants", handleExistingParticipants)
     }
-  }, [socket, isConnected, localStream, id, isAuthenticated, user, searchParams, createPeer, addPeer])
+  }, [
+    socket,
+    isConnected,
+    localStream,
+    id,
+    isAuthenticated,
+    user,
+    searchParams,
+    createPeer,
+    addPeer,
+    updateParticipants,
+  ])
 
   const toggleVideo = useCallback(() => {
     if (localStream) {
