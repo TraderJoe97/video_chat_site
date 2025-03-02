@@ -95,20 +95,6 @@ export default function MeetingPage() {
     [socket],
   )
 
-  const addStreamToPeers = useCallback((userId: string, stream: MediaStream) => {
-    setPeers((prevPeers) => {
-      const updatedPeer = prevPeers[userId] as Peer.Instance
-      if (updatedPeer) {
-        updatedPeer.addStream(stream)
-        return { ...prevPeers, [userId]: updatedPeer }
-      }
-      return prevPeers
-    })
-    if (localStream) {
-      addStreamToPeers(userId, localStream);
-    }
-  }, [])
-
   useEffect(() => {
     if (!isAuthenticated && !searchParams.get("name")) {
       const name = prompt("Please enter your name to join the meeting", "Guest")
@@ -253,4 +239,3 @@ export default function MeetingPage() {
     </div>
   )
 }
-
