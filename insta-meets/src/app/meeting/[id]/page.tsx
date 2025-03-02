@@ -375,59 +375,46 @@ export default function MeetingPage() {
   const isVideoEnabled = localStream?.getVideoTracks()[0]?.enabled ?? false
   const isAudioEnabled = localStream?.getAudioTracks()[0]?.enabled ?? false
 
-  const [selectedStream, setSelectedStream] = useState<string | null>(null)
-
-  const handleStreamClick = (userId: string) => {
-    setSelectedStream((prev) => (prev === userId ? null : userId))
-  }
-
   return (
     <div className="flex flex-col h-screen w-screen">
       <div className="flex flex-col items-center justify-center flex-1 p-4">
-        <div className={`grid ${selectedStream ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"} gap-4`}>
-          <div
-            className={`relative ${selectedStream ? "h-full w-full" : "h-[200px] w-[300px]"}`}
-            onClick={() => handleStreamClick(userIdRef.current)}
-          >
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              className={`rounded-lg shadow-lg object-cover ${selectedStream ? "h-full w-full" : "h-[200px] w-[300px]"}`}
-            />
-            <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
-              You ({user?.name || searchParams.get("name") || userIdRef.current})
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="relative">
+        <video
+          ref={localVideoRef}
+          autoPlay
+          muted
+          className="h-[200px] w-[300px] rounded-lg shadow-lg object-cover"
+        />
+        <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
+          You ({user?.name || searchParams.get("name") || userIdRef.current})
+        </div>
           </div>
 
           {Object.entries(remoteStreams).map(([userId, stream]) => (
-            <div
-              key={userId}
-              className={`relative ${selectedStream === userId ? "h-full w-full" : "h-[200px] w-[300px]"}`}
-              onClick={() => handleStreamClick(userId)}
-            >
-              <VideoComponent stream={stream} />
-              <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
-                {participants.find((p) => p.id === userId)?.name || userId}
-              </div>
-            </div>
+        <div key={userId} className="relative">
+          <VideoComponent stream={stream} />
+          <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
+            {participants.find((p) => p.id === userId)?.name || userId}
+          </div>
+        </div>
           ))}
         </div>
 
         <div className="flex flex-row justify-center mt-6 space-x-4">
           <Button
-            onClick={toggleVideo}
-            variant={isVideoEnabled ? "default" : "destructive"}
-            className="rounded-full h-12 w-12"
+        onClick={toggleVideo}
+        variant={isVideoEnabled ? "default" : "destructive"}
+        className="rounded-full h-12 w-12"
           >
-            {isVideoEnabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+        {isVideoEnabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
           </Button>
           <Button
-            onClick={toggleAudio}
-            variant={isAudioEnabled ? "default" : "destructive"}
-            className="rounded-full h-12 w-12"
+        onClick={toggleAudio}
+        variant={isAudioEnabled ? "default" : "destructive"}
+        className="rounded-full h-12 w-12"
           >
-            {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+        {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
           </Button>
         </div>
       </div>
@@ -444,3 +431,4 @@ export default function MeetingPage() {
     </div>
   )
 }
+
