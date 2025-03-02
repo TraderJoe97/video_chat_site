@@ -60,7 +60,7 @@ export function useSocketConnection({
     const setupSocket = () => {
       if (socketInitializedRef.current || !userId) return
 
-      const socketConnection = io(process.env.BACKEND_URL || "", {
+      const socketConnection = io(process.env.BACKEND_URL, {
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         timeout: 10000,
