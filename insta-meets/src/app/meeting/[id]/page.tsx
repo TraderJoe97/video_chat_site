@@ -169,7 +169,7 @@ export default function MeetingPage() {
       peer.on("error", (err: Error) => {
         console.error("Error in peer connection:", err)
       })
-
+      localStream.getTracks().forEach((track) => peer.addTrack(track, localStream))
       peer.signal(incomingSignal)
 
       return peer
