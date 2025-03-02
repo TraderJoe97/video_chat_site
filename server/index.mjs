@@ -20,7 +20,6 @@ mongoose
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
-// Define Meeting schema with unique meetingId and enforce collection name "meetings"
 const meetingSchema = new mongoose.Schema(
   {
     meetingId: { type: String, required: true, unique: true },
@@ -41,7 +40,6 @@ app.use(
 
 app.use(express.json());
 
-// Test route to see saved meetings
 app.get("/test-meetings", async (req, res) => {
   try {
     const meetings = await Meeting.find({});
@@ -65,7 +63,6 @@ const io = new Server(server, {
   },
   transports: ["websocket", "polling"],
 });
-// Use an in-memory map to track active users per meeting
 const activeUsers = new Map();
 
 io.on("connect", (socket) => {
@@ -81,22 +78,18 @@ io.on("connect", (socket) => {
       `Received join-room for meeting ${meetingId} from user ${username} (${userId})`
     );
 
-    // Create or update the activeUsers set for this meeting
     if (!activeUsers.has(meetingId)) {
       activeUsers.set(meetingId, new Map());
     }
     const usersMap = activeUsers.get(meetingId);
-
-    // Store both userId and username
     usersMap.set(userId, username || userId);
 
-    // Optionally create the meeting record if not exists
     try {
       let meeting = await Meeting.findOne({ meetingId });
       if (!meeting) {
         meeting = new Meeting({
           meetingId,
-          hostId: userId, // first to join becomes host
+          hostId: userId,
           meetingName: "Meeting " + meetingId,
         });
         console.log("Creating new meeting record:", meeting);
@@ -108,13 +101,11 @@ io.on("connect", (socket) => {
 
     socket.join(meetingId);
 
-    // Send the username along with the userId
     socket.to(meetingId).emit("user-connected", {
       userId,
       username: username || userId,
     });
 
-    // Send existing participants to the new user
     const existingParticipants = Array.from(usersMap.entries())
       .filter(([id]) => id !== userId)
       .map(([id, name]) => ({ userId: id, username: name }));
@@ -124,14 +115,12 @@ io.on("connect", (socket) => {
     }
   });
 
-  // Relay chat messages
   socket.on("message", (messageData) => {
     console.log("Received message:", messageData);
     const { meetingId } = messageData;
     io.to(meetingId).emit("createMessage", messageData);
   });
 
-  // WebRTC signaling: offer, answer, candidate events
   socket.on("offer", (data) => {
     console.log(
       `Offer from ${data.callerId} for ${data.userId} in meeting ${data.meetingId}`
@@ -159,16 +148,16 @@ io.on("connect", (socket) => {
   socket.on("disconnect", () => {
     console.log("Socket disconnected:", socket.id);
 
-    // Find which meeting this socket was in
     for (const [meetingId, usersMap] of activeUsers.entries()) {
       if (usersMap.has(socket.id)) {
-        // Remove the user from the meeting
+        const username = usersMap.get(socket.id);
         usersMap.delete(socket.id);
 
-        // Notify other participants
-        socket.to(meetingId).emit("user-disconnected", socket.id);
+        socket.to(meetingId).emit("user-disconnected", {
+          userId: socket.id,
+          username,
+        });
 
-        // If the meeting is empty wait 30 min then remove it
         if (usersMap.size === 0) {
           setTimeout(() => {
             activeUsers.delete(meetingId);
