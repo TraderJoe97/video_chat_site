@@ -15,7 +15,7 @@ interface ChatPanelProps {
   messages: Message[]
   currentUser: string
   meetingId: string
-  onSendMessage: (text: string) => void
+  onSendMessage: (text: string, meetingId: string) => void
 }
 
 export function ChatPanel({ messages, currentUser, meetingId, onSendMessage }: ChatPanelProps) {

@@ -257,7 +257,7 @@ export default function MeetingPage() {
     socket.on("candidate", (data: SignalData) => {
       console.log("Candidate received:", data.callerId, data.candidate)
       if (data.candidate && peersRef.current[data.callerId]) {
-        peersRef.current[data.callerId].signal({ candidate: data.candidate })
+        peersRef.current[data.callerId].signal({ type: "candidate", candidate: data.candidate })
       }
     })
 
