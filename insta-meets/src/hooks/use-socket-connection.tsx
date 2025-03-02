@@ -6,6 +6,7 @@ import { useState, useRef, useEffect } from "react"
 import { io, type Socket } from "socket.io-client"
 import { toast } from "sonner"
 import type { SignalData } from "simple-peer"
+import Peer from "simple-peer"
 
 interface Message {
   text: string
@@ -30,10 +31,10 @@ interface UseSocketConnectionProps {
   userId: string
   username: string
   localStream: MediaStream | null
-  createPeer: (userId: string, socketId: string, stream: MediaStream) => any
-  addPeer: (incomingSignal: SignalData, callerId: string, stream: MediaStream) => any
-  peersRef: React.MutableRefObject<{ [key: string]: any }>
-  monitorPeerConnection: (peer: any, userId: string) => void
+  createPeer: (userId: string, socketId: string, stream: MediaStream) => Peer.Instance
+  addPeer: (incomingSignal: SignalData, callerId: string, stream: MediaStream) => Peer.Instance
+  peersRef: React.MutableRefObject<{ [key: string]: Peer.Instance }>
+  monitorPeerConnection: (peer: Peer.Instance, userId: string) => void
 }
 
 export function useSocketConnection({
@@ -50,7 +51,7 @@ export function useSocketConnection({
   const [participants, setParticipants] = useState<Participant[]>([])
   const [participantNames, setParticipantNames] = useState<ParticipantMap>({})
   const [messages, setMessages] = useState<Message[]>([])
-  const [peers, setPeers] = useState<{ [key: string]: any }>({})
+  const [peers, setPeers] = useState<{ [key: string]: Peer.Instance }>({})
 
   const socketRef = useRef<Socket | null>(null)
   const socketInitializedRef = useRef<boolean>(false)
@@ -144,9 +145,9 @@ export function useSocketConnection({
 
       // Handle answer with stable state checking
       socketConnection.on("answer", (data: { answer: SignalData; callerId: string }) => {
-        const peer = peersRef.current[data.callerId] as any
+        const peer = peersRef.current[data.callerId] as Peer.Instance
         if (peer) {
-          const pc = peer._pc
+          const pc = (peer as unknown as { _pc: RTCPeerConnection })._pc
           // Only signal the answer if the underlying RTCPeerConnection is in "have-local-offer" state.
           if (pc && pc.signalingState === "have-local-offer") {
             console.log(`Setting remote answer for ${data.callerId}`)

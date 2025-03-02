@@ -13,7 +13,7 @@ interface MeetingControlsProps {
   toggleVideo: () => void
   leaveMeeting: () => void
   localStream: MediaStream | null
-  peersRef: React.MutableRefObject<{ [key: string]: any }>
+  peersRef: React.MutableRefObject<{ [key: string]: { _pc: RTCPeerConnection } }>
 }
 
 export function MeetingControls({
@@ -32,10 +32,9 @@ export function MeetingControls({
         const videoTrack = stream.getVideoTracks()[0]
 
         Object.values(peersRef.current).forEach((peer) => {
-          // Cast peer to the correct type
-          const peerConnection = (peer as any)._pc
+          const peerConnection = peer._pc
           if (peerConnection) {
-            const sender = peerConnection.getSenders().find((s: any) => s.track?.kind === "video")
+            const sender = peerConnection.getSenders().find((s: RTCRtpSender) => s.track?.kind === "video")
             if (sender) {
               sender.replaceTrack(videoTrack)
             }
@@ -46,10 +45,9 @@ export function MeetingControls({
           if (localStream) {
             const originalVideoTrack = localStream.getVideoTracks()[0]
             Object.values(peersRef.current).forEach((peer) => {
-              // Cast peer to the correct type
-              const peerConnection = (peer as any)._pc
+              const peerConnection = peer._pc
               if (peerConnection) {
-                const sender = peerConnection.getSenders().find((s: any) => s.track?.kind === "video")
+                const sender = peerConnection.getSenders().find((s: RTCRtpSender) => s.track?.kind === "video")
                 if (sender) {
                   sender.replaceTrack(originalVideoTrack)
                 }

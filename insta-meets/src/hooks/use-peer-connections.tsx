@@ -4,7 +4,14 @@ import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
 import Peer, { type SignalData } from "simple-peer"
+import { Socket } from "socket.io-client"
 
+declare global {
+  interface Window {
+    socketEmit?: (event: string, data: unknown) => void
+    socketRef?: { current: Socket | null }
+  }
+}
 interface Peers {
   [key: string]: Peer.Instance
 }
@@ -79,6 +86,10 @@ export function usePeerConnections(meetingId: string, bandwidthRef: React.Mutabl
       }
     })
 
+    peersRef.current[userId] = peer
+    setPeers((prevPeers) => ({ ...prevPeers, [userId]: peer }))
+    monitorPeerConnection(peer, userId)
+
     return peer
   }
 
@@ -143,11 +154,16 @@ export function usePeerConnections(meetingId: string, bandwidthRef: React.Mutabl
 
     // Signal the incoming offer to establish the connection
     peer.signal(incomingSignal)
+
+    peersRef.current[callerId] = peer
+    setPeers((prevPeers) => ({ ...prevPeers, [callerId]: peer }))
+    monitorPeerConnection(peer, callerId)
+
     return peer
   }
 
   const monitorPeerConnection = (peer: Peer.Instance, userId: string) => {
-    const pc = (peer as any)._pc
+    const pc = (peer as unknown as { _pc: RTCPeerConnection })._pc
     if (pc) {
       pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state with ${userId}:`, pc.iceConnectionState)
@@ -168,7 +184,7 @@ export function usePeerConnections(meetingId: string, bandwidthRef: React.Mutabl
       Object.values(peersRef.current).forEach((peer) => {
         try {
           peer.send(JSON.stringify({ type: "bandwidth", value: bandwidthRef.current }))
-        } catch (err) {
+        } catch {
           // Ignore errors when peer is not connected
         }
       })
@@ -179,23 +195,16 @@ export function usePeerConnections(meetingId: string, bandwidthRef: React.Mutabl
 
   useEffect(() => {
     // Add a global function to emit socket events from peer connections
-    window.socketEmit = (event: string, data: any) => {
+    window.socketEmit = (event: string, data: unknown) => {
       // This will be set by the socket connection hook
       if (window.socketRef?.current) {
         window.socketRef.current.emit(event, data)
       }
     }
 
-    // For TypeScript
-    declare global {
-      interface Window {
-        socketEmit?: (event: string, data: any) => void
-        socketRef?: { current: any }
-      }
-    }
-
     return () => {
-      Object.values(peersRef.current).forEach((peer) => peer.destroy())
+      const peers = peersRef.current
+      Object.values(peers).forEach((peer) => peer.destroy())
     }
   }, [])
 
