@@ -375,16 +375,25 @@ export default function MeetingPage() {
   const isVideoEnabled = localStream?.getVideoTracks()[0]?.enabled ?? false
   const isAudioEnabled = localStream?.getAudioTracks()[0]?.enabled ?? false
 
+  const [selectedStream, setSelectedStream] = useState<string | null>(null)
+
+  const handleStreamClick = (userId: string) => {
+    setSelectedStream((prev) => (prev === userId ? null : userId))
+  }
+
   return (
     <div className="flex flex-col h-screen w-screen">
       <div className="flex flex-col items-center justify-center flex-1 p-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="relative">
+        <div className={`grid ${selectedStream ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"} gap-4`}>
+          <div
+            className={`relative ${selectedStream ? "h-full w-full" : "h-[200px] w-[300px]"}`}
+            onClick={() => handleStreamClick(userIdRef.current)}
+          >
             <video
               ref={localVideoRef}
               autoPlay
               muted
-              className="h-[200px] w-[300px] rounded-lg shadow-lg object-cover"
+              className={`rounded-lg shadow-lg object-cover ${selectedStream ? "h-full w-full" : "h-[200px] w-[300px]"}`}
             />
             <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
               You ({user?.name || searchParams.get("name") || userIdRef.current})
@@ -392,7 +401,11 @@ export default function MeetingPage() {
           </div>
 
           {Object.entries(remoteStreams).map(([userId, stream]) => (
-            <div key={userId} className="relative">
+            <div
+              key={userId}
+              className={`relative ${selectedStream === userId ? "h-full w-full" : "h-[200px] w-[300px]"}`}
+              onClick={() => handleStreamClick(userId)}
+            >
               <VideoComponent stream={stream} />
               <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
                 {participants.find((p) => p.id === userId)?.name || userId}
@@ -431,4 +444,3 @@ export default function MeetingPage() {
     </div>
   )
 }
-
