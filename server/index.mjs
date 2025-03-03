@@ -187,7 +187,7 @@ setInterval(() => {
     });
   });
 }
-
+,60*1000
 )
 //check active users map and delete any entries missing from serverfetchsockets
 
