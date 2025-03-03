@@ -5,6 +5,8 @@ import { createContext, useContext, useEffect, useState } from "react"
 import { io, type Socket } from "socket.io-client"
 import { toast } from "sonner"
 
+
+
 interface SocketContextType {
   socket: Socket | null
   isConnected: boolean
@@ -20,7 +22,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   useEffect(() => {
     // Use the correct environment variable name
-    const backendUrl = process.env.BACKEND_URL
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000"
     console.log("Connecting to socket server at:", backendUrl)
 
     const newSocket = io(backendUrl, {

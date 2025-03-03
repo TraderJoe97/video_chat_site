@@ -417,8 +417,8 @@ export default function MeetingPage() {
         <ChatPanel
           messages={messages}
           currentUser={userIdRef.current}
-          meetingId={id as string}
           onSendMessage={sendMessage}
+          participants={participants}
         />
       </div>
     </div>
