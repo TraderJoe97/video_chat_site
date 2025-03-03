@@ -44,7 +44,7 @@ export default function MeetingPage() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [participants, setParticipants] = useState<Participant[]>([])
-  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({})
+  
   const peersRef = useRef<Record<string, Peer.Instance>>({})
   const userIdRef = useRef<string>("")
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -92,7 +92,7 @@ export default function MeetingPage() {
       const peer = new Peer({
         initiator: true,
         trickle: false,
-        stream: localStream, // This is where we add the local stream
+        stream: localStream,
       })
 
       peer.on("signal", (data: Peer.SignalData) => {
@@ -105,14 +105,7 @@ export default function MeetingPage() {
         })
       })
 
-      peer.on("stream", (remoteStream: MediaStream) => {
-        console.log(`Received stream from ${userId}`, remoteStream)
-        console.log("Stream tracks:", remoteStream.getTracks())
-        setRemoteStreams((prevStreams) => ({
-          ...prevStreams,
-          [userId]: remoteStream,
-        }))
-      })
+     
 
       peer.on("error", (err: Error) => {
         console.error("Error in peer connection:", err)
@@ -121,11 +114,7 @@ export default function MeetingPage() {
 
       peer.on("close", () => {
         console.log(`Peer connection with ${userId} closed`)
-        setRemoteStreams((prevStreams) => {
-          const newStreams = { ...prevStreams }
-          delete newStreams[userId]
-          return newStreams
-        })
+       
       })
 
       return peer
@@ -157,14 +146,8 @@ export default function MeetingPage() {
         })
       })
 
-      peer.on("stream", (remoteStream: MediaStream) => {
-        console.log(`Received stream from ${callerId}`, remoteStream)
-        console.log("Stream tracks:", remoteStream.getTracks())
-        setRemoteStreams((prevStreams) => ({
-          ...prevStreams,
-          [callerId]: remoteStream,
-        }))
-      })
+ 
+      
 
       peer.on("error", (err: Error) => {
         console.error("Error in peer connection:", err)
@@ -192,8 +175,6 @@ export default function MeetingPage() {
           localVideoRef.current.srcObject = stream
         }
 
-        // Emit the local stream to the server
-        socket?.emit("stream", { stream, userId: userIdRef.current, meetingId: id })
       } catch (error) {
         console.error("Error accessing media devices:", error)
         toast.error("Could not access camera or microphone. Please check permissions.")
@@ -231,6 +212,7 @@ export default function MeetingPage() {
       if (userId !== userIdRef.current) {
         console.log(`Creating peer for user ${userId}`)
         const peer = createPeer(userId)
+        peer?.addStream(localStream)
 
         if (peer) {
           peersRef.current[userId] = peer
@@ -277,11 +259,6 @@ export default function MeetingPage() {
 
       setParticipants((prev) => prev.filter((p) => p.id !== userId))
 
-      setRemoteStreams((prevStreams) => {
-        const newStreams = { ...prevStreams }
-        delete newStreams[userId]
-        return newStreams
-      })
     }
 
     const handleCreateMessage = (message: Message) => {
@@ -407,9 +384,9 @@ export default function MeetingPage() {
             </div>
           </div>
 
-          {Object.entries(remoteStreams).map(([userId, stream]) => (
+          {Object.entries(peersRef).map(([userId, data]) => (
             <div key={userId} className="relative">
-              <VideoComponent stream={stream} />
+              <VideoComponent stream={data.stream} />
               <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
                 {participants.find((p) => p.id === userId)?.name || userId}
               </div>

@@ -11,8 +11,11 @@ export const VideoComponent: React.FC<VideoComponentProps> = ({ stream }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current!.srcObject = stream
+    if (videoRef.current) {
+      const tracks = stream.getTracks()
+      tracks.forEach((track) => {
+        videoRef.current!.srcObject = new MediaStream([track])
+      })
     }
   }, [stream])
 
