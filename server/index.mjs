@@ -193,6 +193,18 @@ io.on("connect", (socket) => {
   });
 });
 
+
+setInterval(() => {
+  for (const [meetingId, usersMap] of activeUsers.entries()) {
+    for (const [userId, username] of usersMap.entries()) {
+      if (!serverFetchSockets.has(userId)) {
+        usersMap.delete(userId);
+        console.log(`${username} removed from meeting: ${meetingId}` )
+      }
+    }
+  }
+}, 1000);
+
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
