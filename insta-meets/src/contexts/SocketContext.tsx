@@ -5,8 +5,6 @@ import { createContext, useContext, useEffect, useState } from "react"
 import { io, type Socket } from "socket.io-client"
 import { toast } from "sonner"
 
-
-
 interface SocketContextType {
   socket: Socket | null
   isConnected: boolean
@@ -21,7 +19,6 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
-    // Use the correct environment variable name
     const backendUrl = process.env.BACKEND_URL 
     console.log("Connecting to socket server at:", backendUrl)
 
@@ -60,4 +57,3 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   return <SocketContext.Provider value={{ socket, isConnected }}>{children}</SocketContext.Provider>
 }
-
