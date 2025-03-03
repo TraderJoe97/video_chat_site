@@ -171,28 +171,25 @@ io.on("connect", (socket) => {
   socket.on("disconnect", () => {
     console.log("Socket disconnected:", socket.id);
 
-    for (const [meetingId, usersMap] of activeUsers.entries()) {
-      if (usersMap.has(socket.id)) {
-        const username = usersMap.get(socket.id);
-        usersMap.delete(socket.id);
-
-        socket.to(meetingId).emit("user-disconnected", {
-          userId: socket.id,
-          username,
-        });
-
-        if (usersMap.size === 0) {
-          setTimeout(() => {
-            activeUsers.delete(meetingId);
-          }, 30 * 60 * 1000);
-        }
-
-        break;
-      }
-    }
   });
 });
 
+//check meetings and delete any without active users from databse
+
+setInterval(() => {
+  Meeting.find({}).then((meetings) => {
+    meetings.forEach((meeting) => {
+      if (!activeUsers.has(meeting.meetingId)) {
+        Meeting.deleteOne({ meetingId: meeting.meetingId })
+          .then(() => console.log(`Deleted meeting: ${meeting.meetingId}`))
+          .catch((err) => console.error("Delete error:", err));
+      }
+    });
+  });
+}
+
+)
+//check active users map and delete any entries missing from serverfetchsockets
 
 setInterval(() => {
   for (const [meetingId, usersMap] of activeUsers.entries()) {
