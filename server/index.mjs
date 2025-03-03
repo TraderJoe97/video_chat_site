@@ -194,7 +194,7 @@ setInterval(() => {
 setInterval(() => {
   for (const [meetingId, usersMap] of activeUsers.entries()) {
     for (const [userId, username] of usersMap.entries()) {
-      if (!serverFetchSockets.has(userId)) {
+      if (!io.sockets.sockets.has(userId)) {
         usersMap.delete(userId);
         console.log(`${username} removed from meeting: ${meetingId}` )
       }
