@@ -292,7 +292,7 @@ if (MONGO_URI) {
         }
       })
     })
-  }, 60 * 1000) // Every minute
+  }, 60* 60 * 1000) // Hourly
 }
 
 // Check active users map and clean up disconnected users
