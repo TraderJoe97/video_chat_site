@@ -1,8 +1,8 @@
-const express = require("express")
-const http = require("http")
-const { Server } = require("socket.io")
-const { v4: uuidv4 } = require("uuid")
-const cors = require("cors")
+import express from "express"
+import http from "http"
+import { Server } from "socket.io"
+import { v4 as uuidv4 } from "uuid"
+import cors from "cors"
 
 const app = express()
 app.use(cors())
