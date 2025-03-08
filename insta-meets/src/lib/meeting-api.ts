@@ -85,4 +85,24 @@ export async function createMeeting(hostId: string, meetingName = "Untitled Meet
     return Math.random().toString(36).substring(2, 10)
   }
   
-  
+  /**
+ * Checks if a meeting exists
+ */
+export async function checkMeetingExists(meetingId: string) {
+  const backendUrl = process.env.BACKEND_URL || ""
+
+  try {
+    const response = await fetch(`${backendUrl}/test-meetings`)
+
+    if (!response.ok) {
+      return true // Assume meeting exists if we can't check
+    }
+
+    const meetings = await response.json()
+    return meetings.some((meeting: any) => meeting.meetingId === meetingId)
+  } catch (error) {
+    console.error("Error checking if meeting exists:", error)
+    return true // Assume meeting exists if we can't check
+  }
+}
+

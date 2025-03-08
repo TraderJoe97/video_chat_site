@@ -116,7 +116,9 @@ export default function Dashboard() {
 
   const joinMeeting = () => {
     if (meetingId.trim()) {
-      router.push(`/meeting/${meetingId}`)
+      // Include user name when redirecting to meeting
+      const userName = user?.name || ""
+      router.push(`/meeting/${meetingId}?name=${encodeURIComponent(userName)}`)
     } else {
       toast.error("Please enter a meeting ID")
     }
@@ -208,7 +210,7 @@ export default function Dashboard() {
           <Card>
             <CardHeader>
               <CardTitle>Join a Meeting</CardTitle>
-              <CardDescription>Enter a meeting code to join</CardDescription>
+              <CardDescription>Enter a meeting code to join (guests can also join with a meeting ID)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">

@@ -1,5 +1,3 @@
-
-
 "use client"
 
 import { useRef, useEffect, useState } from "react"
@@ -18,60 +16,62 @@ interface PeerVideoProps {
 
 export const PeerVideo = ({ peer, username, hasHandRaised, className, onReconnect }: PeerVideoProps) => {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const remoteStreamsRef = useRef<MediaStream[]>([])
   const [connectionState, setConnectionState] = useState<string>("new")
   const [hasStream, setHasStream] = useState(false)
   const [isReconnecting, setIsReconnecting] = useState(false)
   const [videoEnabled, setVideoEnabled] = useState(true)
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Debug logging
+  useEffect(() => {
+    console.log(`[PeerVideo] Initializing for peer: ${username}`)
+    console.log(`[PeerVideo] Initial connection state: ${peer.connected ? "connected" : "disconnected"}`)
+
+    return () => {
+      console.log(`[PeerVideo] Cleaning up for peer: ${username}`)
+    }
+  }, [username, peer])
 
   // Handle stream from peer
   useEffect(() => {
+    console.log(`[PeerVideo] Setting up event listeners for peer: ${username}`)
+
     const handleStream = (stream: MediaStream) => {
-      console.log(`Received stream from peer: ${username}`)
-      remoteStreamsRef.current.push(stream)
+      console.log(`[PeerVideo] Received stream from peer: ${username}`)
+      console.log(
+        `[PeerVideo] Stream has ${stream.getVideoTracks().length} video tracks and ${stream.getAudioTracks().length} audio tracks`,
+      )
 
       if (videoRef.current) {
+        console.log(`[PeerVideo] Setting stream to video element for: ${username}`)
         videoRef.current.srcObject = stream
-        //lowers the quality of the video if the connection is slow
-        
         setHasStream(true)
 
         // Check if video tracks are enabled
         const videoTracks = stream.getVideoTracks()
         setVideoEnabled(videoTracks.length > 0 && videoTracks[0].enabled)
-
-        // Listen for track mute/unmute events
-        videoTracks.forEach((track) => {
-          track.onmute = () => setVideoEnabled(false)
-          track.onunmute = () => setVideoEnabled(true)
-        })
+        console.log(`[PeerVideo] Video enabled: ${videoTracks.length > 0 && videoTracks[0].enabled}`)
+      } else {
+        console.error(`[PeerVideo] Video ref is null for: ${username}`)
       }
 
-      // Connection succeeded if we got a stream
       setConnectionState("connected")
     }
 
     // Handle peer errors
     const handleError = (err: Error) => {
-      console.error(`Peer connection error with ${username}:`, err.message)
+      console.error(`[PeerVideo] Peer connection error with ${username}:`, err.message)
       setConnectionState("failed")
 
-      // Auto-reconnect attempt after error
-      if (!reconnectTimeoutRef.current) {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          if (onReconnect) {
-            setIsReconnecting(true)
-            onReconnect()
-          }
-          reconnectTimeoutRef.current = null
-        }, 5000) // Wait 5 seconds before reconnecting
+      if (onReconnect) {
+        console.log(`[PeerVideo] Attempting to reconnect with: ${username}`)
+        setIsReconnecting(true)
+        onReconnect()
       }
     }
 
     // Handle peer close
     const handleClose = () => {
-      console.log(`Peer connection with ${username} closed`)
+      console.log(`[PeerVideo] Peer connection with ${username} closed`)
       setConnectionState("closed")
     }
 
@@ -80,33 +80,21 @@ export const PeerVideo = ({ peer, username, hasHandRaised, className, onReconnec
     peer.on("error", handleError)
     peer.on("close", handleClose)
 
-    // Check if we already have streams stored for this peer
-    if (remoteStreamsRef.current.length > 0) {
-      const stream = remoteStreamsRef.current[0]
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        setHasStream(true)
-      }
-    }
-
     // Set initial connection state
     setConnectionState(peer.connected ? "connected" : "connecting")
 
     // Clean up
     return () => {
+      console.log(`[PeerVideo] Removing event listeners for peer: ${username}`)
       peer.off("stream", handleStream)
       peer.off("error", handleError)
       peer.off("close", handleClose)
-
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-        reconnectTimeoutRef.current = null
-      }
     }
   }, [peer, username, onReconnect])
 
   // Handle manual reconnection
   const handleReconnect = () => {
+    console.log(`[PeerVideo] Manual reconnection requested for: ${username}`)
     if (onReconnect) {
       setIsReconnecting(true)
       onReconnect()
@@ -159,17 +147,11 @@ export const PeerVideo = ({ peer, username, hasHandRaised, className, onReconnec
   return (
     <div className="relative group">
       <div className={cn("bg-muted rounded-lg overflow-hidden", className)}>
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className="w-full h-full object-cover"
-        />
+        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
         {renderConnectionState()}
       </div>
       <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
         {username} {hasHandRaised && "✋"}
-        {connectionState === "slow" && " (Slow connection)"}
       </div>
     </div>
   )
