@@ -114,11 +114,16 @@ export default function Dashboard() {
     }
   }
 
+  // Update the joinMeeting function to handle the new flow
   const joinMeeting = () => {
     if (meetingId.trim()) {
-      // Include user name when redirecting to meeting
-      const userName = user?.name || ""
-      router.push(`/meeting/${meetingId}?name=${encodeURIComponent(userName)}`)
+      // For authenticated users, include the name
+      if (isAuthenticated && user?.name) {
+        router.push(`/meeting/${meetingId}?name=${encodeURIComponent(user.name)}`)
+      } else {
+        // For guests, just go to the meeting page and let the modal handle it
+        router.push(`/meeting/${meetingId}`)
+      }
     } else {
       toast.error("Please enter a meeting ID")
     }
