@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState, useRef, useCallback } from "react"
-import { useParams, useSearchParams, useRouter } from "next/navigation"
+import { useEffect, useState, useRef } from "react"
+import { useParams, useRouter } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
 import Peer from "simple-peer"
 import { useSocket } from "@/contexts/SocketContext"
@@ -14,12 +14,10 @@ import {
   PhoneOff,
   ScreenShare,
   ScreenShareOff,
-  Settings,
-  Users,
   MessageSquare,
+  Users,
   Hand,
   FlagOffIcon as HandOff,
-  MoreVertical,
   Maximize,
   Minimize,
 } from "lucide-react"
@@ -29,20 +27,13 @@ import { toast } from "sonner"
 import { VideoComponent } from "@/components/video-component"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Skeleton } from "@/components/ui/skeleton"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 
-interface UserConnectedData {
-  userId: string
+interface PeerConnection {
+  peerId: string
+  peer: Peer.Instance
+  stream?: MediaStream
   username: string
-}
-
-interface SignalData {
-  callerId: string
-  offer?: Peer.SignalData
-  answer?: Peer.SignalData
-  candidate?: RTCIceCandidate
 }
 
 interface Message {
@@ -60,591 +51,550 @@ interface Participant {
 }
 
 export default function MeetingPage() {
-  const { id } = useParams<{ id: string }>()
-  const searchParams = useSearchParams()
+  const { id: meetingId } = useParams<{ id: string }>()
   const router = useRouter()
-  const { user, isAuthenticated } = useAuth0()
   const { socket, isConnected } = useSocket()
+  const { user, isAuthenticated, loginWithRedirect } = useAuth0()
+
+  // Media state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-  const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true)
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true)
+  const [isScreenSharing, setIsScreenSharing] = useState(false)
+  const [isHandRaised, setIsHandRaised] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // UI state
+  const [activeTab, setActiveTab] = useState<string>("chat")
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+
+  // Meeting state
+  const [peers, setPeers] = useState<PeerConnection[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [participants, setParticipants] = useState<Participant[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [sidebarContent, setSidebarContent] = useState<"chat" | "participants">("chat")
-  const [isHandRaised, setIsHandRaised] = useState(false)
-  const [isScreenSharing, setIsScreenSharing] = useState(false)
-  const [meetingStartTime] = useState(new Date())
-  const [elapsedTime, setElapsedTime] = useState("00:00:00")
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(true)
-  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({})
 
-  const peersRef = useRef<Record<string, Peer.Instance>>({})
-  const userIdRef = useRef<string>("")
+  // Refs
+  const peersRef = useRef<PeerConnection[]>([])
   const localVideoRef = useRef<HTMLVideoElement>(null)
-  const screenVideoRef = useRef<HTMLVideoElement>(null)
-  const meetingContainerRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  const updateParticipants = useCallback((newParticipant: Participant) => {
-    setParticipants((prev) => {
-      const exists = prev.some((p) => p.id === newParticipant.id)
-      if (!exists) {
-        return [...prev, newParticipant]
-      }
-      return prev.map((p) => (p.id === newParticipant.id ? { ...p, ...newParticipant } : p))
-    })
-  }, [])
-
-  // Update meeting timer
+  // Initialize media and join meeting
   useEffect(() => {
-    const timerInterval = setInterval(() => {
-      const now = new Date()
-      const diff = now.getTime() - meetingStartTime.getTime()
-
-      const hours = Math.floor(diff / (1000 * 60 * 60))
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000)
-
-      setElapsedTime(
-        `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
-      )
-    }, 1000)
-
-    return () => clearInterval(timerInterval)
-  }, [meetingStartTime])
-
-  useEffect(() => {
-    if (isAuthenticated && user?.sub) {
-      userIdRef.current = user.sub
-    } else if (searchParams.get("name")) {
-      userIdRef.current = searchParams.get("name") || `guest-${Math.floor(Math.random() * 1000)}`
-    } else {
-      const name = prompt("Please enter your name to join the meeting", "Guest")
-      userIdRef.current = name || `guest-${Math.floor(Math.random() * 1000)}`
+    if (!isAuthenticated) {
+      loginWithRedirect({ appState: { returnTo: `/meeting/${meetingId}` } })
+      return
     }
 
-    setParticipants([
-      {
-        id: userIdRef.current,
-        name: user?.name || searchParams.get("name") || userIdRef.current,
-        isYou: true,
-      },
-    ])
+    if (!socket || !isConnected || !user) return
 
-    console.log("Current user ID set to:", userIdRef.current)
-  }, [isAuthenticated, user, searchParams])
-
-  const createPeer = useCallback(
-    (userId: string) => {
-      console.log(`Creating peer for ${userId}`)
-
-      if (!localStream) {
-        console.error("Cannot create peer: local stream is null")
-        return null
-      }
-
+    const initializeMediaAndJoinMeeting = async () => {
       try {
-        // Fix: Set trickle to true for better connection establishment
-        const peer = new Peer({
-          initiator: true,
-          trickle: true,
-          config: {
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:global.stun.twilio.com:3478" }],
-          },
-        })
-
-        peer.on("signal", (data: Peer.SignalData) => {
-          console.log(`Sending offer to ${userId}`, data.type || "candidate")
-          socket?.emit("offer", {
-            meetingId: id,
-            callerId: userIdRef.current,
-            userId: userId,
-            offer: data,
-          })
-        })
-
-        peer.on("stream", (stream: MediaStream) => {
-          console.log(`Received stream from ${userId}`)
-          setRemoteStreams((prev) => ({
-            ...prev,
-            [userId]: stream,
-          }))
-        })
-
-        peer.on("error", (err: Error) => {
-          console.error("Error in peer connection:", err)
-          toast.error(`Connection error with ${userId}: ${err.message}`)
-        })
-
-        peer.on("close", () => {
-          console.log(`Peer connection with ${userId} closed`)
-        })
-
-        // Add tracks to the peer connection instead of the entire stream
-        localStream.getTracks().forEach((track) => {
-          peer.addTrack(track, localStream)
-        })
-
-        return peer
-      } catch (error) {
-        console.error("Error creating peer:", error)
-        toast.error("Failed to create peer connection")
-        return null
-      }
-    },
-    [socket, localStream, id],
-  )
-
-  const addPeer = useCallback(
-    (incomingSignal: Peer.SignalData, callerId: string) => {
-      console.log(`Adding peer for ${callerId}`)
-
-      if (!localStream) {
-        console.error("Cannot add peer: local stream is null")
-        return null
-      }
-
-      try {
-        // Fix: Set trickle to true for better connection establishment
-        const peer = new Peer({
-          initiator: false,
-          trickle: true,
-          config: {
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:global.stun.twilio.com:3478" }],
-          },
-        })
-
-        peer.on("signal", (data: Peer.SignalData) => {
-          console.log(`Sending answer signal to ${callerId}`)
-          socket?.emit("answer", {
-            meetingId: id,
-            callerId: callerId,
-            answer: data,
-          })
-        })
-
-        peer.on("stream", (stream: MediaStream) => {
-          console.log(`Received stream from ${callerId}`)
-          setRemoteStreams((prev) => ({
-            ...prev,
-            [callerId]: stream,
-          }))
-        })
-
-        peer.on("error", (err: Error) => {
-          console.error("Error in peer connection:", err)
-          toast.error(`Connection error: ${err.message}`)
-        })
-
-        // Add tracks to the peer connection instead of the entire stream
-        localStream.getTracks().forEach((track) => {
-          peer.addTrack(track, localStream)
-        })
-
-        peer.signal(incomingSignal)
-
-        return peer
-      } catch (error) {
-        console.error("Error adding peer:", error)
-        toast.error("Failed to add peer connection")
-        return null
-      }
-    },
-    [socket, localStream, id],
-  )
-
-  useEffect(() => {
-    const initializeStream = async () => {
-      try {
-        console.log("Requesting user media")
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true,
         })
-        console.log("Media stream obtained:", stream.id)
-        setLocalStream(stream)
 
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream
         }
 
-        setIsLoading(false)
+        setLocalStream(stream)
+
+        // Add yourself to participants
+        const currentUser: Participant = {
+          id: user.sub || user.email || "user-" + Date.now(),
+          name: user.name || user.email || "You",
+          isYou: true,
+        }
+
+        setParticipants((prev) => {
+          if (prev.some((p) => p.id === currentUser.id)) return prev
+          return [...prev, currentUser]
+        })
+
+        // Join the meeting room
+        socket.emit("join-room", {
+          meetingId,
+          userId: currentUser.id,
+          username: currentUser.name,
+        })
+
+        toast.success("Joined meeting successfully")
       } catch (error) {
-        console.error("Error accessing media devices:", error)
-        toast.error("Could not access camera or microphone. Please check permissions.")
-        setIsLoading(false)
+        console.error("Failed to get media devices:", error)
+        toast.error("Failed to access camera or microphone")
       }
     }
 
-    initializeStream()
+    initializeMediaAndJoinMeeting()
 
     return () => {
-      if (localStream) {
-        console.log("Stopping all tracks in local stream")
-        localStream.getTracks().forEach((track) => track.stop())
-      }
+      // Clean up
+      localStream?.getTracks().forEach((track) => track.stop())
 
-      if (screenStream) {
-        console.log("Stopping all tracks in screen stream")
-        screenStream.getTracks().forEach((track) => track.stop())
-      }
-
-      Object.values(peersRef.current).forEach((peer) => {
-        console.log("Destroying peer connection")
+      // Disconnect peers
+      peersRef.current.forEach(({ peer }) => {
         peer.destroy()
       })
-    }
-  }, [])
 
+      // Leave the room
+      if (socket && user) {
+        socket.emit("leave-room", {
+          meetingId,
+          userId: user.sub || user.email || "user-" + Date.now(),
+        })
+      }
+    }
+  }, [isConnected, socket, user, isAuthenticated, loginWithRedirect, meetingId])
+
+  // Socket event handlers
   useEffect(() => {
-    if (isConnected) {
-      setIsConnecting(false)
-    }
-  }, [isConnected])
+    if (!socket || !user) return
 
-  useEffect(() => {
-    if (!socket || !isConnected || !localStream || !userIdRef.current) {
-      return
-    }
+    const userId = user.sub || user.email || "user-" + Date.now()
 
-    console.log("Setting up socket event listeners")
-
-    const hostId = isAuthenticated && user?.sub ? user.sub : userIdRef.current
-
-    const handleUserConnected = (data: UserConnectedData) => {
+    // Handle new user connected
+    const handleUserConnected = (data: { userId: string; username: string }) => {
       console.log("User connected:", data)
-      const { userId, username } = data
 
-      if (userId !== userIdRef.current) {
-        console.log(`Creating peer for user ${userId}`)
-        const peer = createPeer(userId)
+      // Add to participants list
+      setParticipants((prev) => {
+        if (prev.some((p) => p.id === data.userId)) return prev
+        return [...prev, { id: data.userId, name: data.username }]
+      })
 
-        if (peer) {
-          peersRef.current[userId] = peer
-          updateParticipants({ id: userId, name: username })
+      // Create a new peer connection
+      if (localStream) {
+        const peer = createPeer(data.userId, userId, localStream)
+
+        peersRef.current.push({
+          peerId: data.userId,
+          peer,
+          username: data.username,
+        })
+
+        setPeers((prev) => [
+          ...prev,
+          {
+            peerId: data.userId,
+            peer,
+            username: data.username,
+          },
+        ])
+      }
+    }
+
+    // Handle existing participants
+    const handleExistingParticipants = (participants: { userId: string; username: string }[]) => {
+      console.log("Existing participants:", participants)
+
+      participants.forEach((participant) => {
+        // Add to participants list
+        setParticipants((prev) => {
+          if (prev.some((p) => p.id === participant.userId)) return prev
+          return [...prev, { id: participant.userId, name: participant.username }]
+        })
+
+        // Create a new peer connection
+        if (localStream) {
+          const peer = createPeer(participant.userId, userId, localStream)
+
+          peersRef.current.push({
+            peerId: participant.userId,
+            peer,
+            username: participant.username,
+          })
+
+          setPeers((prev) => [
+            ...prev,
+            {
+              peerId: participant.userId,
+              peer,
+              username: participant.username,
+            },
+          ])
         }
-      }
+      })
     }
 
-    const handleOffer = (data: SignalData) => {
-      console.log("Offer received:", data.callerId, data.offer)
-      if (data.offer && data.callerId !== userIdRef.current) {
-        if (!peersRef.current[data.callerId]) {
-          console.log(`Creating new peer from offer for ${data.callerId}`)
-          const peer = addPeer(data.offer, data.callerId)
-
-          if (peer) {
-            peersRef.current[data.callerId] = peer
-          }
-        } else {
-          // Fix: Handle offer even if peer exists
-          peersRef.current[data.callerId].signal(data.offer)
-        }
-      }
-    }
-
-    const handleAnswer = (data: SignalData) => {
-      console.log("Answer received:", data.callerId, data.answer)
-      if (data.answer && peersRef.current[data.callerId]) {
-        peersRef.current[data.callerId].signal(data.answer)
-      }
-    }
-
-    const handleCandidate = (data: SignalData) => {
-      console.log("Candidate received:", data.callerId, data.candidate)
-      if (data.candidate && peersRef.current[data.callerId]) {
-        peersRef.current[data.callerId].signal({ type: "candidate", candidate: data.candidate })
-      }
-    }
-
+    // Handle user disconnected
     const handleUserDisconnected = (userId: string) => {
       console.log("User disconnected:", userId)
 
-      if (peersRef.current[userId]) {
-        peersRef.current[userId].destroy()
-        delete peersRef.current[userId]
-      }
-
-      // Remove remote stream when user disconnects
-      setRemoteStreams((prev) => {
-        const newStreams = { ...prev }
-        delete newStreams[userId]
-        return newStreams
-      })
-
+      // Remove from participants list
       setParticipants((prev) => prev.filter((p) => p.id !== userId))
-      toast.info(`${participants.find((p) => p.id === userId)?.name || "A participant"} left the meeting`)
+
+      // Close and remove peer connection
+      const peerObj = peersRef.current.find((p) => p.peerId === userId)
+      if (peerObj) {
+        peerObj.peer.destroy()
+      }
+
+      peersRef.current = peersRef.current.filter((p) => p.peerId !== userId)
+      setPeers((prev) => prev.filter((p) => p.peerId !== userId))
     }
 
-    const handleCreateMessage = (message: Message) => {
-      console.log("Chat message received:", message)
-      if (message.senderId !== userIdRef.current) {
-        setMessages((prev) => [...prev, message])
-        if (!isSidebarOpen || sidebarContent !== "chat") {
-          toast.info(`New message from ${participants.find((p) => p.id === message.senderId)?.name || "Someone"}`)
-        }
+    // Handle WebRTC signaling - offer
+    const handleOffer = (data: { callerId: string; offer: Peer.SignalData }) => {
+      console.log("Received offer from:", data.callerId)
+
+      if (!localStream) return
+
+      const peer = addPeer(data.callerId, userId, data.offer, localStream)
+
+      const peerObj = peersRef.current.find((p) => p.peerId === data.callerId)
+      const username = peerObj?.username || data.callerId
+
+      if (!peerObj) {
+        peersRef.current.push({
+          peerId: data.callerId,
+          peer,
+          username,
+        })
+
+        setPeers((prev) => [
+          ...prev,
+          {
+            peerId: data.callerId,
+            peer,
+            username,
+          },
+        ])
       }
     }
 
-    const handleExistingParticipants = (existingParticipants: Array<{ userId: string; username: string }>) => {
-      console.log("Existing participants:", existingParticipants)
+    // Handle WebRTC signaling - answer
+    const handleAnswer = (data: { callerId: string; answer: Peer.SignalData }) => {
+      console.log("Received answer from:", data.callerId)
 
-      existingParticipants.forEach(({ userId, username }) => {
-        if (userId !== userIdRef.current) {
-          updateParticipants({ id: userId, name: username })
-        }
-      })
+      const peerObj = peersRef.current.find((p) => p.peerId === data.callerId)
+      if (peerObj) {
+        peerObj.peer.signal(data.answer)
+      }
     }
 
+    // Handle WebRTC signaling - ICE candidate
+    const handleCandidate = (data: { callerId: string; candidate: RTCIceCandidate }) => {
+      console.log("Received ICE candidate from:", data.callerId)
+
+      const peerObj = peersRef.current.find((p) => p.peerId === data.callerId)
+      if (peerObj) {
+        peerObj.peer.signal({ type: "candidate", candidate: data.candidate })
+      }
+    }
+
+    // Handle chat messages
+    const handleMessage = (message: Message) => {
+      setMessages((prev) => [...prev, message])
+    }
+
+    // Handle hand raise
     const handleRaiseHand = (data: { userId: string; isRaised: boolean }) => {
-      updateParticipants({
-        id: data.userId,
-        hasHandRaised: data.isRaised,
-        name: participants.find((p) => p.id === data.userId)?.name || data.userId,
-      })
-
-      if (data.isRaised && data.userId !== userIdRef.current) {
-        toast.info(`${participants.find((p) => p.id === data.userId)?.name || "Someone"} raised their hand`)
-      }
+      setParticipants((prev) => prev.map((p) => (p.id === data.userId ? { ...p, hasHandRaised: data.isRaised } : p)))
     }
 
-    // Fix: Ensure we're sending the correct data structure
-    socket.emit("join-room", {
-      meetingId: id,
-      userId: userIdRef.current,
-      username: user?.name || searchParams.get("name") || userIdRef.current,
-      hostId: hostId,
-    })
-
+    // Register event handlers
     socket.on("user-connected", handleUserConnected)
+    socket.on("existing-participants", handleExistingParticipants)
+    socket.on("user-disconnected", handleUserDisconnected)
     socket.on("offer", handleOffer)
     socket.on("answer", handleAnswer)
     socket.on("candidate", handleCandidate)
-    socket.on("user-disconnected", handleUserDisconnected)
-    socket.on("createMessage", handleCreateMessage)
-    socket.on("existing-participants", handleExistingParticipants)
+    socket.on("createMessage", handleMessage)
     socket.on("raise-hand", handleRaiseHand)
 
     return () => {
+      // Unregister event handlers
       socket.off("user-connected", handleUserConnected)
+      socket.off("existing-participants", handleExistingParticipants)
+      socket.off("user-disconnected", handleUserDisconnected)
       socket.off("offer", handleOffer)
       socket.off("answer", handleAnswer)
       socket.off("candidate", handleCandidate)
-      socket.off("user-disconnected", handleUserDisconnected)
-      socket.off("createMessage", handleCreateMessage)
-      socket.off("existing-participants", handleExistingParticipants)
+      socket.off("createMessage", handleMessage)
       socket.off("raise-hand", handleRaiseHand)
     }
-  }, [
-    socket,
-    isConnected,
-    localStream,
-    id,
-    isAuthenticated,
-    user,
-    searchParams,
-    createPeer,
-    addPeer,
-    updateParticipants,
-    participants,
-    isSidebarOpen,
-    sidebarContent,
-  ])
+  }, [socket, localStream, user, meetingId])
 
-  useEffect(() => {
-    if (localStream && participants.length > 1) {
-      participants.forEach((participant) => {
-        if (participant.id !== userIdRef.current && !peersRef.current[participant.id]) {
-          const peer = createPeer(participant.id)
-          if (peer) {
-            peersRef.current[participant.id] = peer
-          }
-        }
+  // Create a peer connection (initiator)
+  const createPeer = (userToSignal: string, callerId: string, stream: MediaStream) => {
+    const peer = new Peer({
+      initiator: true,
+      trickle: false,
+      stream,
+    })
+
+    peer.on("signal", (signal) => {
+      socket?.emit("offer", {
+        meetingId,
+        userId: userToSignal,
+        callerId,
+        offer: signal,
       })
-    }
-  }, [localStream, participants, createPeer])
+    })
 
+    peer.on("stream", (remoteStream) => {
+      setPeers((prev) => prev.map((p) => (p.peerId === userToSignal ? { ...p, stream: remoteStream } : p)))
+    })
+
+    return peer
+  }
+
+  // Add a peer connection (receiver)
+  const addPeer = (callerId: string, userId: string, incomingSignal: Peer.SignalData, stream: MediaStream) => {
+    const peer = new Peer({
+      initiator: false,
+      trickle: false,
+      stream,
+    })
+
+    peer.on("signal", (signal) => {
+      socket?.emit("answer", {
+        meetingId,
+        callerId,
+        userId,
+        answer: signal,
+      })
+    })
+
+    peer.on("stream", (remoteStream) => {
+      setPeers((prev) => prev.map((p) => (p.peerId === callerId ? { ...p, stream: remoteStream } : p)))
+    })
+
+    peer.signal(incomingSignal)
+
+    return peer
+  }
+
+  // Toggle video
   const toggleVideo = () => {
     if (localStream) {
       const videoTrack = localStream.getVideoTracks()[0]
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled
-        setLocalStream((prevStream) => prevStream)
+        setIsVideoEnabled(videoTrack.enabled)
       }
     }
   }
 
+  // Toggle audio
   const toggleAudio = () => {
     if (localStream) {
       const audioTrack = localStream.getAudioTracks()[0]
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled
-        setLocalStream((prevStream) => prevStream)
+        setIsAudioEnabled(audioTrack.enabled)
       }
     }
   }
 
-  const toggleScreenShare = async () => {
-    if (isScreenSharing && screenStream) {
-      screenStream.getTracks().forEach((track) => track.stop())
-      setScreenStream(null)
-      setIsScreenSharing(false)
-      return
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true,
-      })
-
-      setScreenStream(stream)
-      setIsScreenSharing(true)
-
-      if (screenVideoRef.current) {
-        screenVideoRef.current.srcObject = stream
+  // Toggle screen sharing
+  const toggleScreenSharing = async () => {
+    if (isScreenSharing) {
+      // Stop screen sharing and revert to camera
+      if (localStream) {
+        const videoTrack = localStream.getVideoTracks()[0]
+        if (videoTrack) {
+          videoTrack.stop()
+        }
       }
 
-      // Handle when user stops sharing via browser UI
-      stream.getVideoTracks()[0].onended = () => {
-        setScreenStream(null)
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = newStream
+        }
+
+        setLocalStream(newStream)
         setIsScreenSharing(false)
+
+        // Update all peer connections with the new stream
+        peersRef.current.forEach(({ peer }) => {
+          peer.removeStream(localStream!)
+          peer.addStream(newStream)
+        })
+      } catch (error) {
+        console.error("Error reverting to camera:", error)
+        toast.error("Failed to revert to camera")
       }
-    } catch (error) {
-      console.error("Error sharing screen:", error)
-      toast.error("Could not share screen. Please check permissions.")
+    } else {
+      // Start screen sharing
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = screenStream
+        }
+
+        // Keep audio from the original stream
+        if (localStream) {
+          const audioTrack = localStream.getAudioTracks()[0]
+          if (audioTrack) {
+            screenStream.addTrack(audioTrack)
+          }
+        }
+
+        setLocalStream(screenStream)
+        setIsScreenSharing(true)
+
+        // Update all peer connections with the new stream
+        peersRef.current.forEach(({ peer }) => {
+          peer.removeStream(localStream!)
+          peer.addStream(screenStream)
+        })
+
+        // Handle the case when user stops sharing via the browser UI
+        screenStream.getVideoTracks()[0].onended = () => {
+          toggleScreenSharing()
+        }
+      } catch (error) {
+        console.error("Error sharing screen:", error)
+        toast.error("Failed to share screen")
+      }
     }
   }
 
+  // Toggle hand raise
   const toggleHandRaise = () => {
-    setIsHandRaised(!isHandRaised)
-    socket?.emit("raise-hand", {
-      meetingId: id,
-      userId: userIdRef.current,
-      isRaised: !isHandRaised,
+    if (!socket || !user) return
+
+    const userId = user.sub || user.email || "user-" + Date.now()
+    const newState = !isHandRaised
+
+    socket.emit("raise-hand", {
+      meetingId,
+      userId,
+      isRaised: newState,
     })
 
+    setIsHandRaised(newState)
+
     // Update local participant state
-    setParticipants((prev) => prev.map((p) => (p.isYou ? { ...p, hasHandRaised: !isHandRaised } : p)))
+    setParticipants((prev) => prev.map((p) => (p.isYou ? { ...p, hasHandRaised: newState } : p)))
   }
 
+  // Toggle fullscreen
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement && meetingContainerRef.current) {
-      meetingContainerRef.current.requestFullscreen().catch((err) => {
-        toast.error(`Error attempting to enable fullscreen: ${err.message}`)
+    if (!containerRef.current) return
+
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch((err) => {
+        console.error("Error attempting to enable fullscreen:", err)
       })
       setIsFullscreen(true)
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen()
-        setIsFullscreen(false)
-      }
+      document.exitFullscreen()
+      setIsFullscreen(false)
     }
   }
 
+  // Leave meeting
   const leaveMeeting = () => {
-    // Clean up resources
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop())
-    }
+    // Stop all tracks
+    localStream?.getTracks().forEach((track) => track.stop())
 
-    if (screenStream) {
-      screenStream.getTracks().forEach((track) => track.stop())
-    }
-
-    Object.values(peersRef.current).forEach((peer) => {
+    // Disconnect peers
+    peersRef.current.forEach(({ peer }) => {
       peer.destroy()
     })
 
-    // Notify server
-    socket?.emit("leave-room", {
-      meetingId: id,
-      userId: userIdRef.current,
-    })
+    // Leave the room
+    if (socket && user) {
+      socket.emit("leave-room", {
+        meetingId,
+        userId: user.sub || user.email || "user-" + Date.now(),
+      })
+    }
 
-    // Redirect to home
-    router.push("/")
+    // Navigate to dashboard
+    router.push("/dashboard")
   }
 
-  const sendMessage = useCallback(
-    (text: string) => {
-      if (socket && text.trim()) {
-        const messageData: Message = {
-          senderId: userIdRef.current,
-          content: text,
-          timestamp: new Date().toISOString(),
-        }
+  // Send chat message
+  const sendMessage = (content: string) => {
+    if (!socket || !user) return
 
-        socket.emit("message", {
-          meetingId: id,
-          ...messageData,
-        })
-        setMessages((prev) => [...prev, messageData])
-      }
-    },
-    [socket, id],
-  )
+    const userId = user.sub || user.email || "user-" + Date.now()
+    const messageData = {
+      meetingId,
+      senderId: userId,
+      content,
+      timestamp: new Date().toISOString(),
+    }
 
-  const isVideoEnabled = localStream?.getVideoTracks()[0]?.enabled ?? true
-  const isAudioEnabled = localStream?.getAudioTracks()[0]?.enabled ?? true
-
-  const getGridClass = () => {
-    const totalVideos = (isScreenSharing ? 1 : 0) + 1 + Object.keys(remoteStreams).length
-
-    if (isScreenSharing) return "grid-cols-1"
-    if (totalVideos <= 1) return "grid-cols-1"
-    if (totalVideos <= 2) return "grid-cols-1 md:grid-cols-2"
-    if (totalVideos <= 4) return "grid-cols-1 md:grid-cols-2"
-    if (totalVideos <= 6) return "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
-    return "grid-cols-1 md:grid-cols-3 lg:grid-cols-4"
+    socket.emit("message", messageData)
+    setMessages((prev) => [...prev, messageData])
   }
 
-  if (isConnecting) {
+  // Calculate grid layout based on number of participants
+  const getGridLayout = () => {
+    const totalParticipants = peers.length + 1 // +1 for local user
+
+    if (totalParticipants === 1) {
+      return "grid-cols-1"
+    } else if (totalParticipants === 2) {
+      return "grid-cols-1 md:grid-cols-2"
+    } else if (totalParticipants <= 4) {
+      return "grid-cols-1 md:grid-cols-2"
+    } else if (totalParticipants <= 9) {
+      return "grid-cols-1 sm:grid-cols-2 md:grid-cols-3"
+    } else {
+      return "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
+    }
+  }
+
+  // Calculate video height based on number of participants
+  const getVideoHeight = () => {
+    const totalParticipants = peers.length + 1 // +1 for local user
+
+    if (totalParticipants === 1) {
+      return "h-full"
+    } else if (totalParticipants === 2) {
+      return "h-full md:h-[calc(100vh-12rem)]"
+    } else if (totalParticipants <= 4) {
+      return "h-64 md:h-[calc(50vh-6rem)]"
+    } else if (totalParticipants <= 9) {
+      return "h-48 md:h-[calc(33vh-4rem)]"
+    } else {
+      return "h-40 md:h-[calc(25vh-3rem)]"
+    }
+  }
+
+  if (!isAuthenticated) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen">
-        <h1 className="text-2xl font-bold mb-4">Connecting to server...</h1>
-        <div className="flex space-x-2">
-          <div className="w-3 h-3 bg-primary rounded-full animate-bounce"></div>
-          <div className="w-3 h-3 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0.2s" }}></div>
-          <div className="w-3 h-3 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0.4s" }}></div>
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-4">Authentication Required</h1>
+          <p className="mb-4">Please log in to join the meeting</p>
+          <Button onClick={() => loginWithRedirect({ appState: { returnTo: `/meeting/${meetingId}` } })}>Log In</Button>
         </div>
-      </div>
-    )
-  }
-
-  if (!isConnected) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen">
-        <h1 className="text-2xl font-bold mb-4">Connection to server failed</h1>
-        <p className="mb-4">Please check your internet connection and try again.</p>
-        <Button onClick={() => window.location.reload()}>Retry Connection</Button>
       </div>
     )
   }
 
   return (
-    <div ref={meetingContainerRef} className="flex flex-col h-screen w-screen bg-background overflow-hidden">
+    <div ref={containerRef} className="flex flex-col h-screen bg-background">
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-2 border-b bg-card">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold">Meeting: {id}</h1>
-          <div className="text-sm text-muted-foreground">{elapsedTime}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="text-sm bg-primary/10 text-primary px-2 py-1 rounded-full">
-            {participants.length} {participants.length === 1 ? "participant" : "participants"}
-          </div>
+      <header className="flex items-center justify-between p-4 border-b">
+        <h1 className="text-xl font-bold">Meeting: {meetingId}</h1>
+        <div className="flex items-center space-x-2">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={toggleFullscreen}
-                  aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-                >
-                  {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                <Button variant="outline" size="icon" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+                  {activeTab === "chat" ? <MessageSquare className="h-5 w-5" /> : <Users className="h-5 w-5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{isSidebarOpen ? "Close sidebar" : "Open sidebar"}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" onClick={toggleFullscreen}>
+                  {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}</TooltipContent>
@@ -656,113 +606,70 @@ export default function MeetingPage() {
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Video grid */}
-        <div className={cn("flex-1 p-4 overflow-auto", isSidebarOpen ? "md:pr-[350px]" : "")}>
-          {isLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <Skeleton className="h-[200px] w-[300px] rounded-lg mb-4" />
-                <Skeleton className="h-4 w-[250px] mx-auto mb-2" />
-                <Skeleton className="h-4 w-[200px] mx-auto" />
+        <div className={cn("flex-1 p-4 overflow-y-auto", isSidebarOpen ? "md:w-2/3" : "w-full")}>
+          <div className={cn("grid gap-4", getGridLayout())}>
+            {/* Local video */}
+            <div className="relative group">
+              <div className={cn("bg-muted rounded-lg overflow-hidden", getVideoHeight())}>
+                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              </div>
+              <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
+                You {isHandRaised && "✋"}
               </div>
             </div>
-          ) : (
-            <div id="video-grid" className={`grid ${getGridClass()} gap-4 h-full`}>
-              {isScreenSharing && (
-                <div className="relative col-span-full row-span-2 min-h-[300px]">
-                  <video
-                    ref={screenVideoRef}
-                    autoPlay
-                    className="w-full h-full rounded-lg shadow-lg object-contain bg-black"
-                  />
-                  <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm">
-                    Screen Share
-                  </div>
-                </div>
-              )}
 
-              <div className="relative min-h-[200px]">
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  className={cn(
-                    "h-full w-full rounded-lg shadow-lg object-cover bg-black",
-                    !isVideoEnabled && "bg-gray-900",
+            {/* Remote videos */}
+            {peers.map((peer) => (
+              <div key={peer.peerId} className="relative group">
+                <div className={cn("bg-muted rounded-lg overflow-hidden", getVideoHeight())}>
+                  {peer.stream ? (
+                    <VideoComponent stream={peer.stream} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex items-center justify-center w-full h-full">
+                      <span className="text-muted-foreground">Connecting...</span>
+                    </div>
                   )}
-                />
-                <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm flex items-center gap-1">
-                  <span>You ({user?.name || searchParams.get("name") || userIdRef.current})</span>
-                  {!isAudioEnabled && <MicOff className="h-3 w-3 text-red-500" />}
-                  {participants.find((p) => p.isYou)?.hasHandRaised && <Hand className="h-3 w-3 text-yellow-500" />}
+                </div>
+                <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
+                  {peer.username} {participants.find((p) => p.id === peer.peerId)?.hasHandRaised && "✋"}
                 </div>
               </div>
-
-              {/* Render remote streams */}
-              {Object.entries(remoteStreams).map(([userId, stream]) => (
-                <div key={userId} className="relative min-h-[200px]">
-                  <VideoComponent
-                    stream={stream}
-                    className="h-full w-full rounded-lg shadow-lg object-cover bg-black"
-                  />
-                  <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm flex items-center gap-1">
-                    <span>{participants.find((p) => p.id === userId)?.name || userId}</span>
-                    {participants.find((p) => p.id === userId)?.hasHandRaised && (
-                      <Hand className="h-3 w-3 text-yellow-500" />
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+            ))}
+          </div>
         </div>
 
         {/* Sidebar */}
-        <div
-          className={cn(
-            "fixed top-[57px] right-0 bottom-[72px] w-[350px] bg-card border-l transition-transform duration-300 z-10 overflow-hidden",
-            isSidebarOpen ? "translate-x-0" : "translate-x-full md:translate-x-0 md:w-0",
-          )}
-        >
-          <Tabs
-            defaultValue="chat"
-            value={sidebarContent}
-            onValueChange={(v) => setSidebarContent(v as "chat" | "participants")}
-          >
-            <TabsList className="w-full">
-              <TabsTrigger value="chat" className="flex-1">
-                Chat
-              </TabsTrigger>
-              <TabsTrigger value="participants" className="flex-1">
-                Participants
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="chat" className="h-[calc(100%-40px)]">
-              <ChatPanel
-                messages={messages.map(({ senderId, content }) => ({ senderId, content }))}
-                onSendMessage={sendMessage}
-                participants={participants}
-              />
-            </TabsContent>
-            <TabsContent value="participants" className="h-[calc(100%-40px)]">
-              <ParticipantsPanel participants={participants} />
-            </TabsContent>
-          </Tabs>
-        </div>
+        {isSidebarOpen && (
+          <div className="w-full md:w-1/3 border-l h-full flex flex-col">
+            <Tabs defaultValue="chat" value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+              <TabsList className="grid grid-cols-2 mx-4 my-2">
+                <TabsTrigger value="chat">Chat</TabsTrigger>
+                <TabsTrigger value="participants">Participants ({participants.length})</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="chat" className="flex-1 flex flex-col">
+                <ChatPanel messages={messages} participants={participants} onSendMessage={sendMessage} />
+              </TabsContent>
+
+              <TabsContent value="participants" className="flex-1">
+                <ParticipantsPanel participants={participants} />
+              </TabsContent>
+            </Tabs>
+          </div>
+        )}
       </div>
 
       {/* Controls */}
-      <div className="flex items-center justify-between px-4 py-3 border-t bg-card">
-        <div className="flex items-center gap-2">
+      <footer className="p-4 border-t bg-background">
+        <div className="flex items-center justify-center space-x-4">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={toggleAudio}
                   variant={isAudioEnabled ? "outline" : "destructive"}
                   size="icon"
-                  className="rounded-full h-10 w-10"
-                  aria-label={isAudioEnabled ? "Mute microphone" : "Unmute microphone"}
+                  onClick={toggleAudio}
+                  className="rounded-full h-12 w-12"
                 >
                   {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
                 </Button>
@@ -775,11 +682,10 @@ export default function MeetingPage() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={toggleVideo}
                   variant={isVideoEnabled ? "outline" : "destructive"}
                   size="icon"
-                  className="rounded-full h-10 w-10"
-                  aria-label={isVideoEnabled ? "Turn off camera" : "Turn on camera"}
+                  onClick={toggleVideo}
+                  className="rounded-full h-12 w-12"
                 >
                   {isVideoEnabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
                 </Button>
@@ -792,11 +698,10 @@ export default function MeetingPage() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={toggleScreenShare}
                   variant={isScreenSharing ? "default" : "outline"}
                   size="icon"
-                  className="rounded-full h-10 w-10"
-                  aria-label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+                  onClick={toggleScreenSharing}
+                  className="rounded-full h-12 w-12"
                 >
                   {isScreenSharing ? <ScreenShareOff className="h-5 w-5" /> : <ScreenShare className="h-5 w-5" />}
                 </Button>
@@ -809,11 +714,10 @@ export default function MeetingPage() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={toggleHandRaise}
                   variant={isHandRaised ? "default" : "outline"}
                   size="icon"
-                  className="rounded-full h-10 w-10"
-                  aria-label={isHandRaised ? "Lower hand" : "Raise hand"}
+                  onClick={toggleHandRaise}
+                  className="rounded-full h-12 w-12"
                 >
                   {isHandRaised ? <HandOff className="h-5 w-5" /> : <Hand className="h-5 w-5" />}
                 </Button>
@@ -822,90 +726,18 @@ export default function MeetingPage() {
             </Tooltip>
           </TooltipProvider>
 
-          <DropdownMenu>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon" className="rounded-full h-10 w-10" aria-label="More options">
-                      <MoreVertical className="h-5 w-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent>More options</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => toast.info("Settings will be available soon")}>
-                <Settings className="h-4 w-4 mr-2" />
-                <span>Settings</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        <div className="flex items-center gap-2">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  onClick={() => {
-                    setIsSidebarOpen(!isSidebarOpen)
-                    setSidebarContent("chat")
-                  }}
-                  variant={isSidebarOpen && sidebarContent === "chat" ? "default" : "outline"}
-                  size="icon"
-                  className="rounded-full h-10 w-10"
-                  aria-label="Toggle chat"
-                >
-                  <MessageSquare className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isSidebarOpen && sidebarContent === "chat" ? "Hide chat" : "Show chat"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={() => {
-                    setIsSidebarOpen(!isSidebarOpen)
-                    setSidebarContent("participants")
-                  }}
-                  variant={isSidebarOpen && sidebarContent === "participants" ? "default" : "outline"}
-                  size="icon"
-                  className="rounded-full h-10 w-10"
-                  aria-label="Toggle participants"
-                >
-                  <Users className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {isSidebarOpen && sidebarContent === "participants" ? "Hide participants" : "Show participants"}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={leaveMeeting}
-                  variant="destructive"
-                  size="sm"
-                  className="rounded-full"
-                  aria-label="Leave meeting"
-                >
-                  <PhoneOff className="h-4 w-4 mr-2" />
-                  <span>Leave</span>
+                <Button variant="destructive" size="icon" onClick={leaveMeeting} className="rounded-full h-12 w-12">
+                  <PhoneOff className="h-5 w-5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Leave meeting</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
-      </div>
+      </footer>
     </div>
   )
 }
