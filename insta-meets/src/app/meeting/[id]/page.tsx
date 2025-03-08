@@ -77,6 +77,7 @@ export default function MeetingPage() {
   const peersRef = useRef<PeerConnection[]>([])
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
   // Initialize media and join meeting
   useEffect(() => {
@@ -94,11 +95,16 @@ export default function MeetingPage() {
           audio: true,
         })
 
+        // Store stream in ref for consistent access
+        streamRef.current = stream
+
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream
         }
 
         setLocalStream(stream)
+        setIsVideoEnabled(true)
+        setIsAudioEnabled(true)
 
         // Add yourself to participants
         const currentUser: Participant = {
@@ -130,7 +136,9 @@ export default function MeetingPage() {
 
     return () => {
       // Clean up
-      localStream?.getTracks().forEach((track) => track.stop())
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop())
+      }
 
       // Disconnect peers
       peersRef.current.forEach(({ peer }) => {
@@ -163,9 +171,9 @@ export default function MeetingPage() {
         return [...prev, { id: data.userId, name: data.username }]
       })
 
-      // Create a new peer connection
-      if (localStream) {
-        const peer = createPeer(data.userId, userId, localStream)
+      // Create a new peer connection if we have a stream
+      if (streamRef.current) {
+        const peer = createPeer(data.userId, userId, streamRef.current)
 
         peersRef.current.push({
           peerId: data.userId,
@@ -188,6 +196,9 @@ export default function MeetingPage() {
     const handleExistingParticipants = (participants: { userId: string; username: string }[]) => {
       console.log("Existing participants:", participants)
 
+      // Only proceed if we have a stream
+      if (!streamRef.current) return
+
       participants.forEach((participant) => {
         // Add to participants list
         setParticipants((prev) => {
@@ -196,24 +207,22 @@ export default function MeetingPage() {
         })
 
         // Create a new peer connection
-        if (localStream) {
-          const peer = createPeer(participant.userId, userId, localStream)
+        const peer = createPeer(participant.userId, userId, streamRef.current!)
 
-          peersRef.current.push({
+        peersRef.current.push({
+          peerId: participant.userId,
+          peer,
+          username: participant.username,
+        })
+
+        setPeers((prev) => [
+          ...prev,
+          {
             peerId: participant.userId,
             peer,
             username: participant.username,
-          })
-
-          setPeers((prev) => [
-            ...prev,
-            {
-              peerId: participant.userId,
-              peer,
-              username: participant.username,
-            },
-          ])
-        }
+          },
+        ])
       })
     }
 
@@ -318,13 +327,16 @@ export default function MeetingPage() {
 
   // Create a peer connection (initiator)
   const createPeer = (userToSignal: string, callerId: string, stream: MediaStream) => {
+    console.log(`Creating peer to connect with ${userToSignal}`)
+
     const peer = new Peer({
       initiator: true,
       trickle: false,
-      stream,
+      stream: stream, // Explicitly pass the stream
     })
 
     peer.on("signal", (signal) => {
+      console.log(`Sending offer signal to ${userToSignal}`)
       socket?.emit("offer", {
         meetingId,
         userId: userToSignal,
@@ -338,13 +350,16 @@ export default function MeetingPage() {
 
   // Add a peer connection (receiver)
   const addPeer = (callerId: string, userId: string, incomingSignal: Peer.SignalData, stream: MediaStream) => {
+    console.log(`Adding peer for ${callerId}`)
+
     const peer = new Peer({
       initiator: false,
       trickle: false,
-      stream,
+      stream: stream, // Explicitly pass the stream
     })
 
     peer.on("signal", (signal) => {
+      console.log(`Sending answer signal to ${callerId}`)
       socket?.emit("answer", {
         meetingId,
         callerId,
@@ -353,6 +368,7 @@ export default function MeetingPage() {
       })
     })
 
+    // Process the incoming signal
     peer.signal(incomingSignal)
 
     return peer
@@ -360,8 +376,8 @@ export default function MeetingPage() {
 
   // Toggle video
   const toggleVideo = () => {
-    if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0]
+    if (streamRef.current) {
+      const videoTrack = streamRef.current.getVideoTracks()[0]
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled
         setIsVideoEnabled(videoTrack.enabled)
@@ -371,8 +387,8 @@ export default function MeetingPage() {
 
   // Toggle audio
   const toggleAudio = () => {
-    if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0]
+    if (streamRef.current) {
+      const audioTrack = streamRef.current.getAudioTracks()[0]
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled
         setIsAudioEnabled(audioTrack.enabled)
@@ -384,8 +400,8 @@ export default function MeetingPage() {
   const toggleScreenSharing = async () => {
     if (isScreenSharing) {
       // Stop screen sharing and revert to camera
-      if (localStream) {
-        const videoTrack = localStream.getVideoTracks()[0]
+      if (streamRef.current) {
+        const videoTrack = streamRef.current.getVideoTracks()[0]
         if (videoTrack) {
           videoTrack.stop()
         }
@@ -393,6 +409,8 @@ export default function MeetingPage() {
 
       try {
         const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+
+        streamRef.current = newStream
 
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = newStream
@@ -403,7 +421,7 @@ export default function MeetingPage() {
 
         // Update all peer connections with the new stream
         peersRef.current.forEach(({ peer }) => {
-          peer.removeStream(localStream!)
+          peer.removeStream(streamRef.current!)
           peer.addStream(newStream)
         })
       } catch (error) {
@@ -415,16 +433,18 @@ export default function MeetingPage() {
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true })
 
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = screenStream
-        }
-
         // Keep audio from the original stream
-        if (localStream) {
-          const audioTrack = localStream.getAudioTracks()[0]
+        if (streamRef.current) {
+          const audioTrack = streamRef.current.getAudioTracks()[0]
           if (audioTrack) {
             screenStream.addTrack(audioTrack)
           }
+        }
+
+        streamRef.current = screenStream
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = screenStream
         }
 
         setLocalStream(screenStream)
@@ -432,7 +452,7 @@ export default function MeetingPage() {
 
         // Update all peer connections with the new stream
         peersRef.current.forEach(({ peer }) => {
-          peer.removeStream(localStream!)
+          peer.removeStream(streamRef.current!)
           peer.addStream(screenStream)
         })
 
