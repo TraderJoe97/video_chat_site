@@ -1,200 +1,331 @@
 import express from "express"
 import http from "http"
+import mongoose from "mongoose"
+import dotenv from "dotenv"
 import { Server } from "socket.io"
-import { v4 as uuidv4 } from "uuid"
 import cors from "cors"
 
-const app = express()
-app.use(cors())
+dotenv.config()
 
+const PORT = process.env.PORT || 4000
+const MONGO_URI = process.env.MONGO_URI
+const FRONTEND_URL = process.env.FRONTEND_URL || "*"
+
+if (!MONGO_URI) {
+  console.warn("MongoDB URI is not defined! Running without database persistence.")
+}
+
+// MongoDB Connection
+if (MONGO_URI) {
+  mongoose
+    .connect(MONGO_URI)
+    .then(() => console.log("Connected to MongoDB"))
+    .catch((err) => console.error("MongoDB connection error:", err))
+}
+
+// Meeting Schema
+const meetingSchema = new mongoose.Schema(
+  {
+    meetingId: { type: String, required: true, unique: true },
+    hostId: { type: String, required: true },
+    meetingName: { type: String, default: "Untitled Meeting" },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { collection: "meetings" }
+)
+const Meeting = mongoose.model("Meeting", meetingSchema)
+
+// Express App Setup
+const app = express()
+app.use(
+  cors({
+    origin: FRONTEND_URL,
+    methods: ["GET", "POST"],
+  })
+)
+app.use(express.json())
+
+// API Routes
+app.get("/test-meetings", async (req, res) => {
+  if (!MONGO_URI) {
+    return res.status(503).json({ error: "Database not configured" })
+  }
+  
+  try {
+    const meetings = await Meeting.find({})
+    res.json(meetings)
+  } catch (error) {
+    console.error("Error fetching meetings:", error)
+    res.status(500).json({ error: "Failed to fetch meetings" })
+  }
+})
+
+app.post("/create-meeting", async (req, res) => {
+  if (!MONGO_URI) {
+    return res.status(503).json({ error: "Database not configured" })
+  }
+  
+  const { meetingId, hostId, meetingName } = req.body
+  try {
+    const newMeeting = new Meeting({ meetingId, hostId, meetingName })
+    await newMeeting.save()
+    res.status(201).json(newMeeting)
+  } catch (error) {
+    console.error("Error creating meeting:", error)
+    res.status(500).json({ error: "Failed to create meeting" })
+  }
+})
+
+// Health Check Endpoint
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ 
+    status: "ok", 
+    message: "Server is running",
+    database: MONGO_URI ? "connected" : "not configured"
+  })
+})
+
+// HTTP Server and Socket.io Setup
 const server = http.createServer(app)
 const io = new Server(server, {
   cors: {
-    origin: process.env.BACKEND_URL,
+    origin: FRONTEND_URL,
     methods: ["GET", "POST"],
+    credentials: true,
   },
+  transports: ["websocket", "polling"],
 })
 
-// Add a health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' })
-})
+// Active Users Tracking
+const activeUsers = new Map()
 
-// Add a Meeting test endpoint to get all meetings from databasse
-app.get('/test-meetings', (req, res) => {
-  res.status(200).json({ status: 'ok', meetings: [] })
-})
+// Socket.io Connection Handling
+io.on("connect", (socket) => {
+  console.log("Socket connected:", socket.id)
 
-// Store active rooms
-const rooms = new Map()
-
-io.on("connection", (socket) => {
-  console.log(`User connected: ${socket.id}`)
-
-  // Ping-pong for testing
+  // Ping-Pong for Testing
   socket.on("ping", (data) => {
-    console.log(`Received ping from ${socket.id}: ${data}`)
-    socket.emit("pong", "Server pong response")
+    console.log("Received ping:", data)
+    socket.emit("pong", "Hello client")
   })
 
-  // Create a new room
-  socket.on("create-room", () => {
-    const roomId = uuidv4().substring(0, 8)
+  // Join Room
+  socket.on("join-room", async ({ meetingId, userId, username }) => {
+    console.log(`Received join-room for meeting ${meetingId} from user ${username} (${userId})`)
 
-    // Join the room
-    socket.join(roomId)
+    // Track user in the meeting
+    if (!activeUsers.has(meetingId)) {
+      activeUsers.set(meetingId, new Map())
+    }
+    const usersMap = activeUsers.get(meetingId)
+    usersMap.set(userId, username || userId)
+    
+    // Associate socket ID with user ID for easier cleanup
+    socket.userId = userId
+    socket.meetingId = meetingId
 
-    // Store room info
-    rooms.set(roomId, {
-      creator: socket.id,
-      participants: [{ id: socket.id, username: "Host" }],
-    })
-
-    // Notify client
-    socket.emit("room-created", roomId)
-    console.log(`Room created: ${roomId} by ${socket.id}`)
-  })
-
-  // Join an existing room
-  socket.on("join-room", (data) => {
-    const { meetingId, userId, username, hostId } = data
-    console.log(`User ${userId} (${username}) attempting to join room: ${meetingId}`)
-
-    let room = rooms.get(meetingId)
-
-    // Create room if it doesn't exist (for direct join links)
-    if (!room) {
-      room = {
-        creator: hostId || userId,
-        participants: [],
+    // Store meeting in database if MongoDB is configured
+    if (MONGO_URI) {
+      try {
+        let meeting = await Meeting.findOne({ meetingId })
+        if (!meeting) {
+          meeting = new Meeting({
+            meetingId,
+            hostId: userId,
+            meetingName: "Meeting " + meetingId,
+          })
+          console.log("Creating new meeting record:", meeting)
+          await meeting.save().catch((err) => console.error("Save error:", err))
+        }
+      } catch (error) {
+        console.error("Error in join-room meeting check:", error)
       }
-      rooms.set(meetingId, room)
-      console.log(`Room ${meetingId} created for direct join`)
     }
 
-    // Join the socket.io room
+    // Join the Socket.io room
     socket.join(meetingId)
 
-    // Add to participants if not already there
-    if (!room.participants.some(p => p.id === userId)) {
-      room.participants.push({ id: userId, username })
-    }
-
-    // Notify existing participants about the new user
-    socket.to(meetingId).emit("user-connected", { userId, username })
+    // Notify other participants about the new user
+    socket.to(meetingId).emit("user-connected", {
+      userId,
+      username: username || userId,
+    })
 
     // Send existing participants to the new user
-    socket.emit("existing-participants", room.participants.filter(p => p.id !== userId))
+    const existingParticipants = Array.from(usersMap.entries())
+      .filter(([id]) => id !== userId)
+      .map(([id, name]) => ({ userId: id, username: name }))
 
-    // Notify client
-    socket.emit("room-joined", meetingId)
-    console.log(`User ${userId} (${username}) joined room: ${meetingId}`)
+    if (existingParticipants.length > 0) {
+      socket.emit("existing-participants", existingParticipants)
+    }
   })
 
-  // Handle WebRTC signaling
+  // Chat Messages
+  socket.on("message", (messageData) => {
+    console.log("Received message:", messageData)
+    const { meetingId } = messageData
+    io.to(meetingId).emit("createMessage", messageData)
+  })
+
+  // WebRTC Signaling - Offer
   socket.on("offer", (data) => {
-    const { meetingId, callerId, userId, offer } = data
-    console.log(`Offer from ${callerId} to ${userId} in room ${meetingId}`)
-
-    // Forward the offer to the specific user
-    socket.to(meetingId).emit("offer", {
-      callerId,
-      offer,
+    console.log(`Offer from ${data.callerId} for ${data.userId} in meeting ${data.meetingId}`)
+    
+    // Fixed: Use room broadcast for better reliability
+    socket.to(data.meetingId).emit("offer", {
+      callerId: data.callerId,
+      offer: data.offer,
     })
   })
 
+  // WebRTC Signaling - Answer
   socket.on("answer", (data) => {
-    const { meetingId, callerId, answer } = data
-    console.log(`Answer from ${socket.id} to ${callerId} in room ${meetingId}`)
-
-    // Forward the answer to the specific user
-    socket.to(meetingId).emit("answer", {
-      callerId: socket.id,
-      answer,
-    })
+    console.log(`Answer from ${socket.id} to ${data.callerId} in meeting ${data.meetingId}`)
+    
+    // Fixed: Use direct socket ID if available, otherwise use room
+    if (io.sockets.sockets.has(data.callerId)) {
+      socket.to(data.callerId).emit("answer", {
+        callerId: socket.userId || socket.id,
+        answer: data.answer,
+      })
+    } else {
+      socket.to(data.meetingId).emit("answer", {
+        callerId: socket.userId || socket.id,
+        answer: data.answer,
+      })
+    }
   })
 
+  // WebRTC Signaling - ICE Candidate
   socket.on("candidate", (data) => {
-    const { meetingId, callerId, candidate } = data
-    console.log(`ICE candidate from ${socket.id} to ${callerId} in room ${meetingId}`)
+    console.log(`Candidate from ${socket.id} to ${data.callerId} in meeting ${data.meetingId}`)
+    
+    // Fixed: Use direct socket ID if available, otherwise use room
+    if (io.sockets.sockets.has(data.callerId)) {
+      socket.to(data.callerId).emit("candidate", {
+        callerId: socket.userId || socket.id,
+        candidate: data.candidate,
+      })
+    } else {
+      socket.to(data.meetingId).emit("candidate", {
+        callerId: socket.userId || socket.id,
+        candidate: data.candidate,
+      })
+    }
+  })
 
-    // Forward the ICE candidate to the specific user
-    socket.to(meetingId).emit("candidate", {
-      callerId: socket.id,
-      candidate,
+  // Stream Events
+  socket.on("stream", (data) => {
+    console.log(`Stream from ${data.userId} in meeting ${data.meetingId}`)
+    socket.to(data.meetingId).emit("stream", {
+      userId: data.userId,
+      stream: data.stream,
     })
   })
 
-  // Handle chat messages
-  socket.on("message", (data) => {
-    const { meetingId, senderId, content, timestamp } = data
-    console.log(`Message in room ${meetingId} from ${senderId}: ${content}`)
-
-    // Broadcast the message to all users in the room
-    io.to(meetingId).emit("createMessage", {
-      senderId,
-      content,
-      timestamp,
-    })
-  })
-
-  // Handle raise hand
+  // Raise Hand
   socket.on("raise-hand", (data) => {
-    const { meetingId, userId, isRaised } = data
-    console.log(`User ${userId} ${isRaised ? 'raised' : 'lowered'} hand in room ${meetingId}`)
-
-    // Broadcast to all users in the room
-    io.to(meetingId).emit("raise-hand", {
-      userId,
-      isRaised,
+    console.log(`User ${data.userId} ${data.isRaised ? 'raised' : 'lowered'} hand in room ${data.meetingId}`)
+    io.to(data.meetingId).emit("raise-hand", {
+      userId: data.userId,
+      isRaised: data.isRaised,
     })
   })
 
-  // Leave a room
+  // Leave Room
   socket.on("leave-room", (data) => {
     const { meetingId, userId } = data
-    leaveRoom(socket, meetingId, userId)
+    handleUserLeaving(socket, meetingId, userId)
   })
 
-  // Handle disconnection
+  // Disconnect
   socket.on("disconnect", () => {
-    console.log(`User disconnected: ${socket.id}`)
-
-    // Find and leave all rooms the user was in
-    for (const [roomId, room] of rooms.entries()) {
-      const participant = room.participants.find(p => p.id === socket.id || p.socketId === socket.id)
-      if (participant) {
-        leaveRoom(socket, roomId, participant.id)
-      }
+    console.log("Socket disconnected:", socket.id)
+    
+    // Clean up user from active meetings
+    if (socket.meetingId && socket.userId) {
+      handleUserLeaving(socket, socket.meetingId, socket.userId)
     }
   })
 })
 
-// Helper function to handle leaving a room
-function leaveRoom(socket, roomId, userId) {
-  const room = rooms.get(roomId)
-
-  if (room) {
-    console.log(`User ${userId} leaving room: ${roomId}`)
+// Helper function to handle user leaving
+function handleUserLeaving(socket, meetingId, userId) {
+  if (!meetingId || !userId) return
+  
+  console.log(`User ${userId} leaving meeting ${meetingId}`)
+  
+  // Remove user from active users map
+  if (activeUsers.has(meetingId)) {
+    const usersMap = activeUsers.get(meetingId)
+    const username = usersMap.get(userId)
+    usersMap.delete(userId)
     
-    // Remove user from participants
-    room.participants = room.participants.filter(p => p.id !== userId && p.socketId !== socket.id)
-
     // Notify other participants
-    socket.to(roomId).emit("user-disconnected", userId)
-
+    socket.to(meetingId).emit("user-disconnected", userId)
+    
     // Leave the socket.io room
-    socket.leave(roomId)
-
-    // If room is empty, delete it
-    if (room.participants.length === 0) {
-      rooms.delete(roomId)
-      console.log(`Room deleted: ${roomId}`)
+    socket.leave(meetingId)
+    
+    console.log(`${username || userId} removed from meeting: ${meetingId}`)
+    
+    // If no users left, clean up the meeting
+    if (usersMap.size === 0) {
+      activeUsers.delete(meetingId)
+      console.log(`No users left in meeting ${meetingId}, removing from active meetings`)
     }
   }
 }
 
-const PORT = process.env.PORT || 3001
+// Cleanup Intervals
+
+// Check meetings and delete any without active users from database
+if (MONGO_URI) {
+  setInterval(() => {
+    Meeting.find({}).then((meetings) => {
+      meetings.forEach((meeting) => {
+        if (!activeUsers.has(meeting.meetingId)) {
+          Meeting.deleteOne({ meetingId: meeting.meetingId })
+            .then(() => console.log(`Deleted meeting: ${meeting.meetingId}`))
+            .catch((err) => console.error("Delete error:", err))
+        }
+      })
+    })
+  }, 60 * 1000) // Every minute
+}
+
+// Check active users map and clean up disconnected users
+setInterval(() => {
+  for (const [meetingId, usersMap] of activeUsers.entries()) {
+    for (const [userId, username] of usersMap.entries()) {
+      // Check if the user's socket is still connected
+      let userConnected = false
+      
+      // Look through all sockets to find if user is still connected
+      for (const [socketId, socket] of io.sockets.sockets.entries()) {
+        if (socket.userId === userId) {
+          userConnected = true
+          break
+        }
+      }
+      
+      if (!userConnected) {
+        usersMap.delete(userId)
+        io.to(meetingId).emit("user-disconnected", userId)
+        console.log(`${username} removed from meeting: ${meetingId} (socket disconnected)`)
+      }
+    }
+    
+    // If no users left in the meeting, remove the meeting
+    if (usersMap.size === 0) {
+      activeUsers.delete(meetingId)
+      console.log(`Meeting ${meetingId} removed from active meetings (no users left)`)
+    }
+  }
+}, 10 * 1000) // Every 10 seconds
+
+// Start the server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
 })
