@@ -392,7 +392,12 @@ export default function MeetingPage() {
     }
 
     // Handle chat messages
+    // ignore messages from local user
     const handleMessage = (message: Message) => {
+     const isLocalUserMessage = message.senderId === userId
+     if (isLocalUserMessage){
+         return
+     } 
       console.log(`[Meeting] Received message from ${message.senderId}: ${message.content}`)
       setMessages((prev) => [...prev, message])
     }

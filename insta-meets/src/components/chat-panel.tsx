@@ -51,20 +51,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMes
     return participant?.name || senderId
   }
 
-  // Filter out messages from the current user to avoid duplication
-  const filteredMessages = messages.filter(
-    (message) =>
-      // Only show messages from other users, not from the current user
-      message.senderId !== currentUserId,
-  )
+
 
   return (
     <div className="flex flex-col h-full">
       <div ref={chatContainerRef} className="flex-grow overflow-y-auto p-4">
-        {filteredMessages.length === 0 ? (
+        {messages.length === 0 ? (
           <div className="text-center text-muted-foreground py-8">No messages yet</div>
         ) : (
-          filteredMessages.map((message, index) => (
+          messages.map((message, index) => (
             <div key={index} className="mb-3 p-2 rounded bg-muted/30">
               <div className="font-bold">{getParticipantName(message.senderId)}</div>
               <div>{message.content}</div>
@@ -80,7 +75,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMes
             placeholder="Type your message..."
             value={newMessage}
             onChange={handleInputChange}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyPress}
           />
           <button
             className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
