@@ -5,7 +5,7 @@
  */
 export async function createMeeting(hostId: string, meetingName = "Untitled Meeting") {
     const backendUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL || localStorage.getItem("NEXT_PUBLIC_BACKEND_URL") || "http://localhost:4000"
+      process.env.BACKEND_URL || localStorage.getItem("BACKEND_URL") || "http://localhost:4000"
     const meetingId = generateMeetingId()
   
     try {
@@ -39,7 +39,7 @@ export async function createMeeting(hostId: string, meetingName = "Untitled Meet
    */
   export async function fetchMeetings() {
     const backendUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL || localStorage.getItem("NEXT_PUBLIC_BACKEND_URL") || "http://localhost:4000"
+      process.env.BACKEND_URL || localStorage.getItem("BACKEND_URL") || "http://localhost:4000"
   
     try {
       const response = await fetch(`${backendUrl}/test-meetings`)
@@ -61,7 +61,7 @@ export async function createMeeting(hostId: string, meetingName = "Untitled Meet
    */
   export async function checkServerHealth() {
     const backendUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL || localStorage.getItem("NEXT_PUBLIC_BACKEND_URL") || "http://localhost:4000"
+      process.env.BACKEND_URL || localStorage.getItem("BACKEND_URL") || "http://localhost:4000"
   
     try {
       const response = await fetch(`${backendUrl}/api/health`)
