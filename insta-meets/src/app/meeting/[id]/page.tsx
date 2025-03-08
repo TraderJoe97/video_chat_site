@@ -996,17 +996,17 @@ export default function MeetingPage() {
     console.log(`[Meeting] Reconnection attempt initiated with ${peerId}`)
   }
 
-  // Loading state while determining user status
-  if (isLoading || (!userId && !username)) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Loading...</h1>
-          <p>Preparing your meeting experience</p>
-        </div>
-      </div>
-    )
-  }
+  // // Loading state while determining user status
+  // if (isLoading || (!userId && !username)) {
+  //   return (
+  //     <div className="flex items-center justify-center h-screen">
+  //       <div className="text-center">
+  //         <h1 className="text-2xl font-bold mb-4">Loading...</h1>
+  //         <p>Preparing your meeting experience</p>
+  //       </div>
+  //     </div>
+  //   )
+  // }
 
   return (
     <div ref={containerRef} className="flex flex-col h-screen bg-background">
