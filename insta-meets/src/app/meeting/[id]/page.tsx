@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
 import Peer from "simple-peer"
@@ -20,6 +20,7 @@ import {
   FlagOffIcon as HandOff,
   Maximize,
   Minimize,
+  WifiOff,
 } from "lucide-react"
 import ChatPanel from "@/components/chat-panel"
 import { ParticipantsPanel } from "@/components/participants-panel"
@@ -325,6 +326,36 @@ export default function MeetingPage() {
     }
   }, [socket, localStream, user, meetingId])
 
+  // Configure WebRTC for low bandwidth
+  const configureLowBandwidth = useCallback(() => {
+    if (!streamRef.current) return
+
+    console.log("Configuring for low bandwidth")
+
+    // Reduce video resolution and bitrate
+    streamRef.current.getVideoTracks().forEach((track) => {
+      track
+        .applyConstraints({
+          width: { ideal: 320 },
+          height: { ideal: 240 },
+          frameRate: { max: 15 },
+        })
+        .catch((e) => console.error("Could not apply video constraints:", e))
+    })
+
+    // Update all peer connections with the optimized stream
+    peersRef.current.forEach(({ peer }) => {
+      try {
+        peer.removeStream(streamRef.current!)
+        peer.addStream(streamRef.current!)
+      } catch (e) {
+        console.error("Error updating stream for low bandwidth:", e)
+      }
+    })
+
+    toast.success("Optimized for slow connection")
+  }, [])
+
   // Create a peer connection (initiator)
   const createPeer = (userToSignal: string, callerId: string, stream: MediaStream) => {
     console.log(`Creating peer to connect with ${userToSignal}`)
@@ -573,6 +604,53 @@ export default function MeetingPage() {
     }
   }
 
+  // Function to handle peer reconnection
+  const handlePeerReconnect = (peerId: string) => {
+    console.log(`Attempting to reconnect with peer: ${peerId}`)
+
+    // Find and remove the existing peer
+    const peerToRemove = peersRef.current.find((p) => p.peerId === peerId)
+    if (peerToRemove) {
+      peerToRemove.peer.destroy()
+    }
+
+    peersRef.current = peersRef.current.filter((p) => p.peerId !== peerId)
+    setPeers((prev) => prev.filter((p) => p.peerId !== peerId))
+
+    // Only attempt reconnection if we have a stream
+    if (!streamRef.current) {
+      console.error("Cannot reconnect: No local stream available")
+      return
+    }
+
+    // Get username from participants list
+    const participant = participants.find((p) => p.id === peerId)
+    const username = participant?.name || peerId
+
+    // Create a new peer connection
+    const userId = user?.sub || user?.email || "user-" + Date.now()
+    const newPeer = createPeer(peerId, userId, streamRef.current)
+
+    // Add the new peer to our lists
+    const peerConnection = {
+      peerId,
+      peer: newPeer,
+      username,
+    }
+
+    peersRef.current.push(peerConnection)
+    setPeers((prev) => [...prev, peerConnection])
+
+    // Notify the server about the reconnection attempt
+    socket?.emit("reconnect-peer", {
+      meetingId,
+      userId: peerId,
+      callerId: userId,
+    })
+
+    console.log(`Reconnection attempt initiated with ${peerId}`)
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -599,6 +677,17 @@ export default function MeetingPage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{isSidebarOpen ? "Close sidebar" : "Open sidebar"}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" onClick={configureLowBandwidth}>
+                  <WifiOff className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Optimize for slow connection</TooltipContent>
             </Tooltip>
           </TooltipProvider>
 
@@ -638,6 +727,7 @@ export default function MeetingPage() {
                 username={peer.username}
                 hasHandRaised={participants.find((p) => p.id === peer.peerId)?.hasHandRaised}
                 className={getVideoHeight()}
+                onReconnect={() => handlePeerReconnect(peer.peerId)}
               />
             ))}
           </div>
