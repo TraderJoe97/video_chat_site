@@ -23,14 +23,14 @@ interface JoinMeetingModalProps {
 }
 
 export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModalProps) {
-  const [guestName, setGuestName] = useState("")
+  const [guestName, setGuestName] = useState("Guest")
   const [activeTab, setActiveTab] = useState<string>("guest")
   const router = useRouter()
   const { loginWithRedirect, isAuthenticated, isLoading, user } = useAuth0()
 
   // If user is already authenticated, redirect to meeting
   if (!isLoading && isAuthenticated && user) {
-    router.push(`/meeting/${meetingId}?name=${encodeURIComponent(user.name || "")}`)
+    router.push(`/meeting/${meetingId}?name=${encodeURIComponent(user.name)}`)
     onClose()
     return null
   }

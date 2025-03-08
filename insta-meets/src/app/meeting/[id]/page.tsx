@@ -34,6 +34,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { PeerVideo } from "@/components/peer-video";
+import joinMeetingModal from "@/components/join-meeting-modal";
 
 interface PeerConnection {
   peerId: string;
@@ -99,9 +100,11 @@ export default function MeetingPage() {
         setUsername(user.name || user.email || "Authenticated User");
       }
       // If not authenticated but has guest name, use that
-      else if (guestName) {
+      else if (guestName == 'guest'.toLowerCase().trim()) {
         setUserId(`guest-${Date.now()}`);
-        setUsername(guestName || "Guest User");
+        setUsername(guestName);
+      } else {
+        joinMeetingModal(meetingId,true, MeetingPage)
       }
       // The redirect is now handled by the parent component
     }
