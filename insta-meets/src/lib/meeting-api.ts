@@ -5,7 +5,7 @@
  */
 export async function createMeeting(hostId: string, meetingName = "Untitled Meeting") {
     const backendUrl =
-      process.env.BACKEND_URL || localStorage.getItem("BACKEND_URL") 
+      process.env.BACKEND_URL || ""
     const meetingId = generateMeetingId()
   
     try {

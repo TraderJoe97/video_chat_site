@@ -21,7 +21,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     // Use environment variable or localStorage fallback
     const backendUrl =
-      process.env.BACKEND_URL || localStorage.getItem("BACKEND_URL") 
+      process.env.BACKEND_URL 
     console.log("Connecting to socket server at:", backendUrl)
 
     const newSocket = io(backendUrl, {
