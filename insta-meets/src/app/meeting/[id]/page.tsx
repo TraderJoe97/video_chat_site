@@ -34,7 +34,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { PeerVideo } from "@/components/peer-video";
-import joinMeetingModal from "@/components/join-meeting-modal";
+import {joinMeetingModal} from "@/components/join-meeting-modal";
 
 interface PeerConnection {
   peerId: string;
