@@ -114,25 +114,27 @@ export default function MeetingPage() {
   }, [meetingStartTime])
 
   useEffect(() => {
+    const nameParam = searchParams.get("name");
+
     if (isAuthenticated && user?.sub) {
-      userIdRef.current = user.sub
-    } else if (searchParams.get("name")) {
-      userIdRef.current = searchParams.get("name") || `guest-${Math.floor(Math.random() * 1000)}`
+      userIdRef.current = user.sub;
+    } else if (nameParam) {
+      userIdRef.current = nameParam || `guest-${Math.floor(Math.random() * 1000)}`;
     } else {
-      const name = prompt("Please enter your name to join the meeting", "Guest")
-      userIdRef.current = name || `guest-${Math.floor(Math.random() * 1000)}`
+      const name = prompt("Please enter your name to join the meeting", "Guest");
+      userIdRef.current = name || `guest-${Math.floor(Math.random() * 1000)}`;
     }
 
     setParticipants([
       {
         id: userIdRef.current,
-        name: user?.name || searchParams.get("name") || userIdRef.current,
+        name: user?.name || nameParam || userIdRef.current,
         isYou: true,
       },
-    ])
+    ]);
 
-    console.log("Current user ID set to:", userIdRef.current)
-  }, [isAuthenticated, user, searchParams])
+    console.log("Current user ID set to:", userIdRef.current);
+  }, [isAuthenticated, user]);
 
   const createPeer = useCallback(
     (userId: string) => {
