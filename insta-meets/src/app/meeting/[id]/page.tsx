@@ -24,10 +24,10 @@ import {
 import ChatPanel from "@/components/chat-panel"
 import { ParticipantsPanel } from "@/components/participants-panel"
 import { toast } from "sonner"
-import { VideoComponent } from "@/components/video-component"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { PeerVideo } from "@/components/peer-video"
 
 interface PeerConnection {
   peerId: string
@@ -333,10 +333,6 @@ export default function MeetingPage() {
       })
     })
 
-    peer.on("stream", (remoteStream) => {
-      setPeers((prev) => prev.map((p) => (p.peerId === userToSignal ? { ...p, stream: remoteStream } : p)))
-    })
-
     return peer
   }
 
@@ -355,10 +351,6 @@ export default function MeetingPage() {
         userId,
         answer: signal,
       })
-    })
-
-    peer.on("stream", (remoteStream) => {
-      setPeers((prev) => prev.map((p) => (p.peerId === callerId ? { ...p, stream: remoteStream } : p)))
     })
 
     peer.signal(incomingSignal)
@@ -620,20 +612,13 @@ export default function MeetingPage() {
 
             {/* Remote videos */}
             {peers.map((peer) => (
-              <div key={peer.peerId} className="relative group">
-                <div className={cn("bg-muted rounded-lg overflow-hidden", getVideoHeight())}>
-                  {peer.stream ? (
-                    <VideoComponent stream={peer.stream} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex items-center justify-center w-full h-full">
-                      <span className="text-muted-foreground">Connecting...</span>
-                    </div>
-                  )}
-                </div>
-                <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
-                  {peer.username} {participants.find((p) => p.id === peer.peerId)?.hasHandRaised && "✋"}
-                </div>
-              </div>
+              <PeerVideo
+                key={peer.peerId}
+                peer={peer.peer}
+                username={peer.username}
+                hasHandRaised={participants.find((p) => p.id === peer.peerId)?.hasHandRaised}
+                className={getVideoHeight()}
+              />
             ))}
           </div>
         </div>
