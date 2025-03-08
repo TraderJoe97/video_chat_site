@@ -20,6 +20,7 @@ import {
   FlagOffIcon as HandOff,
   Maximize,
   Minimize,
+  WifiOff,
 } from "lucide-react"
 import ChatPanel from "@/components/chat-panel"
 import { ParticipantsPanel } from "@/components/participants-panel"
@@ -56,7 +57,7 @@ export default function MeetingPage() {
   const guestName = searchParams.get("name")
   const router = useRouter()
   const { socket, isConnected } = useSocket()
-  const { user, isAuthenticated, isLoading } = useAuth0()
+  const { user, isAuthenticated, loginWithRedirect, isLoading } = useAuth0()
 
   // Media state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
@@ -392,12 +393,7 @@ export default function MeetingPage() {
     }
 
     // Handle chat messages
-    // ignore messages from local user
     const handleMessage = (message: Message) => {
-     const isLocalUserMessage = message.senderId === userId
-     if (isLocalUserMessage){
-         return
-     } 
       console.log(`[Meeting] Received message from ${message.senderId}: ${message.content}`)
       setMessages((prev) => [...prev, message])
     }
@@ -436,14 +432,17 @@ export default function MeetingPage() {
   const [isLowBandwidthMode, setIsLowBandwidthMode] = useState(false)
 
   const configureLowBandwidth = useCallback(() => {
-    if (!streamRef.current) return
+    if (!streamRef.current) {
+      toast.error("No media stream available")
+      return
+    }
 
     // Toggle low bandwidth mode
     const newMode = !isLowBandwidthMode
     setIsLowBandwidthMode(newMode)
 
     if (newMode) {
-      console.log("Enabling low bandwidth mode - reducing outgoing stream quality")
+      console.log("[Meeting] Enabling low bandwidth mode - reducing outgoing stream quality")
 
       // Reduce video resolution and bitrate for outgoing stream
       streamRef.current.getVideoTracks().forEach((track) => {
@@ -455,23 +454,36 @@ export default function MeetingPage() {
               height: { ideal: 180 },
               frameRate: { max: 10 },
             })
-            .catch((e) => console.error("Could not apply video constraints:", e))
+            .then(() => {
+              console.log("[Meeting] Successfully applied low bandwidth constraints")
+            })
+            .catch((e) => {
+              console.error("[Meeting] Could not apply video constraints:", e)
+              toast.error("Failed to reduce video quality")
+            })
         }
       })
 
       // Update all peer connections with the optimized stream
-      peersRef.current.forEach(({ peer }) => {
+      let updateSuccess = true
+      peersRef.current.forEach(({ peer, username }) => {
         try {
+          console.log(`[Meeting] Updating stream for ${username} to low bandwidth`)
           peer.removeStream(streamRef.current!)
           peer.addStream(streamRef.current!)
         } catch (e) {
-          console.error("Error updating stream for low bandwidth:", e)
+          console.error(`[Meeting] Error updating stream for ${username}:`, e)
+          updateSuccess = false
         }
       })
 
-      toast.success("Low bandwidth mode enabled - reduced outgoing video quality")
+      if (updateSuccess) {
+        toast.success("Low bandwidth mode enabled - video quality reduced")
+      } else {
+        toast.warning("Low bandwidth mode partially enabled - some connections may need to be refreshed")
+      }
     } else {
-      console.log("Disabling low bandwidth mode - restoring outgoing stream quality")
+      console.log("[Meeting] Disabling low bandwidth mode - restoring outgoing stream quality")
 
       // Restore higher quality video
       streamRef.current.getVideoTracks().forEach((track) => {
@@ -483,21 +495,34 @@ export default function MeetingPage() {
               height: { ideal: 480 },
               frameRate: { max: 30 },
             })
-            .catch((e) => console.error("Could not apply video constraints:", e))
+            .then(() => {
+              console.log("[Meeting] Successfully restored normal quality constraints")
+            })
+            .catch((e) => {
+              console.error("[Meeting] Could not apply video constraints:", e)
+              toast.error("Failed to restore video quality")
+            })
         }
       })
 
       // Update all peer connections with the restored stream
-      peersRef.current.forEach(({ peer }) => {
+      let updateSuccess = true
+      peersRef.current.forEach(({ peer, username }) => {
         try {
+          console.log(`[Meeting] Updating stream for ${username} to normal quality`)
           peer.removeStream(streamRef.current!)
           peer.addStream(streamRef.current!)
         } catch (e) {
-          console.error("Error updating stream for normal bandwidth:", e)
+          console.error(`[Meeting] Error updating stream for ${username}:`, e)
+          updateSuccess = false
         }
       })
 
-      toast.success("Normal quality mode enabled")
+      if (updateSuccess) {
+        toast.success("Normal quality mode enabled")
+      } else {
+        toast.warning("Normal quality mode partially enabled - some connections may need to be refreshed")
+      }
     }
   }, [isLowBandwidthMode])
 
@@ -510,28 +535,47 @@ export default function MeetingPage() {
       // Check if we have any failed peer connections
       const failedConnections = peersRef.current.filter((p) => {
         try {
-          // This is a simple check - in a real app you might use more sophisticated detection
           return !p.peer.connected
         } catch (e) {
-          console.error("Error checking peer connection:", e)
+          console.error("[Meeting] Error checking peer connection:", e)
           return true // Count as failed if we can't determine
         }
       })
 
       if (failedConnections.length > 0) {
         connectionIssuesCount++
-        console.log(`Connection issues detected (${connectionIssuesCount})`)
+        console.log(`[Meeting] Connection issues detected (${connectionIssuesCount})`)
 
-        // After 3 consecutive issues, suggest low bandwidth mode
-        if (connectionIssuesCount >= 3) {
-          toast("Connection issues detected, Consider enabling low bandwidth mode to improve stability")
+        // After 2 consecutive issues, suggest low bandwidth mode
+        if (connectionIssuesCount >= 2) {
+          toast(
+            () => (
+              <div className="flex flex-col gap-2">
+                <div>Connection issues detected</div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    configureLowBandwidth()
+                    toast.dismiss()
+                  }}
+                >
+                  <WifiOff className="h-4 w-4 mr-2" />
+                  Enable Low Bandwidth Mode
+                </Button>
+              </div>
+            ),
+            {
+              duration: 10000,
+            },
+          )
           clearInterval(connectionCheckInterval)
         }
       } else {
         // Reset counter if connections are good
         connectionIssuesCount = 0
       }
-    }, 10000) // Check every 10 seconds
+    }, 8000) // Check every 8 seconds
 
     return () => clearInterval(connectionCheckInterval)
   }, [streamRef.current, isLowBandwidthMode, configureLowBandwidth])
@@ -544,7 +588,19 @@ export default function MeetingPage() {
       initiator: true,
       trickle: false,
       config: {
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:global.stun.twilio.com:3478" }],
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+          { urls: "stun:stun2.l.google.com:19302" },
+          { urls: "stun:stun3.l.google.com:19302" },
+          { urls: "stun:stun4.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+        ],
+        iceCandidatePoolSize: 10,
+      },
+      sdpTransform: (sdp) => {
+        // Modify SDP to prioritize connection establishment
+        return sdp.replace(/a=ice-options:trickle\s\n/g, "").replace(/a=candidate.*tcp.*\r\n/g, "")
       },
     })
 
@@ -570,6 +626,11 @@ export default function MeetingPage() {
       console.error(`[Meeting] Peer error with ${userToSignal}:`, err.message)
     })
 
+    // Add connection state change handler
+    peer.on("iceStateChange", (state) => {
+      console.log(`[Meeting] ICE state changed for ${userToSignal}:`, state)
+    })
+
     return peer
   }
 
@@ -581,7 +642,19 @@ export default function MeetingPage() {
       initiator: false,
       trickle: false,
       config: {
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:global.stun.twilio.com:3478" }],
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+          { urls: "stun:stun2.l.google.com:19302" },
+          { urls: "stun:stun3.l.google.com:19302" },
+          { urls: "stun:stun4.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+        ],
+        iceCandidatePoolSize: 10,
+      },
+      sdpTransform: (sdp) => {
+        // Modify SDP to prioritize connection establishment
+        return sdp.replace(/a=ice-options:trickle\s\n/g, "").replace(/a=candidate.*tcp.*\r\n/g, "")
       },
     })
 
@@ -605,6 +678,11 @@ export default function MeetingPage() {
 
     peer.on("error", (err) => {
       console.error(`[Meeting] Peer error with ${callerId}:`, err.message)
+    })
+
+    // Add connection state change handler
+    peer.on("iceStateChange", (state) => {
+      console.log(`[Meeting] ICE state changed for ${callerId}:`, state)
     })
 
     // Process the incoming signal
@@ -909,6 +987,26 @@ export default function MeetingPage() {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
+                <Button
+                  variant={isLowBandwidthMode ? "default" : "outline"}
+                  size="icon"
+                  onClick={configureLowBandwidth}
+                  className={isLowBandwidthMode ? "bg-amber-500 hover:bg-amber-600" : ""}
+                >
+                  <WifiOff className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {isLowBandwidthMode
+                  ? "Currently in low bandwidth mode - click to restore quality"
+                  : "Optimize for slow connection (reduces video quality)"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button variant="outline" size="icon" onClick={toggleFullscreen}>
                   {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
                 </Button>
@@ -928,9 +1026,14 @@ export default function MeetingPage() {
             <div className="relative group">
               <div className={cn("bg-muted rounded-lg overflow-hidden", getVideoHeight())}>
                 <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+                {isLowBandwidthMode && (
+                  <div className="absolute top-2 right-2 bg-amber-500 text-white px-2 py-1 rounded text-xs">
+                    Low Quality
+                  </div>
+                )}
               </div>
               <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
-                You {isHandRaised && "✋"}
+                You {isHandRaised && "✋"} {isLowBandwidthMode && "📶"}
               </div>
             </div>
 
