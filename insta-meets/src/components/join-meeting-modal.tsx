@@ -23,23 +23,21 @@ interface JoinMeetingModalProps {
 }
 
 export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModalProps) {
-  const [guestName, setGuestName] = useState("Guest")
+  const [guestName, setGuestName] = useState("")
   const [activeTab, setActiveTab] = useState<string>("guest")
   const router = useRouter()
   const { loginWithRedirect, isAuthenticated, isLoading, user } = useAuth0()
 
+  // If user becomes authenticated while modal is open, redirect to meeting
   useEffect(() => {
-    // If user is already authenticated, redirect to meeting
-    if (!isLoading && isAuthenticated && user) {
-      router.push(`/meeting/${meetingId}?name=${encodeURIComponent(user.name || "Guest")}`)
-      onClose()
+    if (isOpen && !isLoading && isAuthenticated && user) {
+      router.push(`/meeting/${meetingId}?name=${encodeURIComponent(user.name || "")}`)
     }
-  }, [isLoading, isAuthenticated, user, meetingId, router, onClose])
+  }, [isOpen, isLoading, isAuthenticated, user, meetingId, router])
 
   const handleGuestJoin = () => {
     if (guestName.trim()) {
       router.push(`/meeting/${meetingId}?name=${encodeURIComponent(guestName)}`)
-      onClose()
     }
   }
 
@@ -49,9 +47,18 @@ export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModa
     })
   }
 
+  // Prevent closing the modal by clicking outside or pressing escape
+  // This ensures users must either sign in or join as guest
+  const handleOpenChange = (open: boolean) => {
+    if (open === false) {
+      // Only allow closing if we're redirecting
+      onClose()
+    }
+  }
+
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-[425px]" onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>Join Meeting</DialogTitle>
           <DialogDescription>Join meeting {meetingId} as a guest or sign in to your account.</DialogDescription>
@@ -71,7 +78,7 @@ export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModa
                 placeholder="Enter your name"
                 value={guestName}
                 onChange={(e) => setGuestName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleGuestJoin()}
+                onKeyDown={(e) => e.key === "Enter" && guestName.trim() && handleGuestJoin()}
                 autoFocus
               />
             </div>
@@ -84,7 +91,7 @@ export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModa
 
           <TabsContent value="signin" className="space-y-4 py-4">
             <p className="text-sm text-muted-foreground">
-              Sign in to your account to join the meeting. You&apos;ll be able to access all features.
+              Sign in to your account to join the meeting. You'll be able to access all features.
             </p>
             <DialogFooter>
               <Button onClick={handleSignIn}>Sign In</Button>
@@ -95,3 +102,4 @@ export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModa
     </Dialog>
   )
 }
+
