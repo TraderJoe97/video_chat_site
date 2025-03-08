@@ -23,7 +23,7 @@ import {
   Maximize,
   Minimize,
 } from "lucide-react"
-import { ChatPanel } from "@/components/chat-panel"
+import ChatPanel from "@/components/chat-panel"
 import { ParticipantsPanel } from "@/components/participants-panel"
 import { toast } from "sonner"
 import { VideoComponent } from "@/components/video-component"
@@ -46,8 +46,8 @@ interface SignalData {
 }
 
 interface Message {
-  text: string
-  sender: string
+  senderId: string
+  content: string
   timestamp: string
 }
 
@@ -351,10 +351,10 @@ export default function MeetingPage() {
 
     const handleCreateMessage = (message: Message) => {
       console.log("Chat message received:", message)
-      if (message.sender !== userIdRef.current) {
+      if (message.senderId !== userIdRef.current) {
         setMessages((prev) => [...prev, message])
         if (!isSidebarOpen || sidebarContent !== "chat") {
-          toast.info(`New message from ${participants.find((p) => p.id === message.sender)?.name || "Someone"}`)
+          toast.info(`New message from ${participants.find((p) => p.id === message.senderId)?.name || "Someone"}`)
         }
       }
     }
@@ -541,11 +541,10 @@ export default function MeetingPage() {
   const sendMessage = useCallback(
     (text: string) => {
       if (socket && text.trim()) {
-        const messageData = {
-          text,
-          sender: userIdRef.current,
+        const messageData: Message = {
+          senderId: userIdRef.current,
+          content: text,
           timestamp: new Date().toISOString(),
-          meetingId: id,
         }
 
         socket.emit("message", messageData)
@@ -703,8 +702,7 @@ export default function MeetingPage() {
             </TabsList>
             <TabsContent value="chat" className="h-[calc(100%-40px)]">
               <ChatPanel
-                messages={messages}
-                currentUser={userIdRef.current}
+                messages={messages.map(({ senderId, content, timestamp }) => ({ senderId, content, timestamp }))}
                 
                 onSendMessage={sendMessage}
                 participants={participants}
