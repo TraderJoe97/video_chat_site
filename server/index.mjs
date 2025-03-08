@@ -20,6 +20,11 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' })
 })
 
+// Add a Meeting test endpoint to get all meetings from databasse
+app.get('/test-meetings', (req, res) => {
+  res.status(200).json({ status: 'ok', meetings: [] })
+})
+
 // Store active rooms
 const rooms = new Map()
 
