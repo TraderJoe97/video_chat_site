@@ -289,7 +289,7 @@ export default function MeetingPage() {
 
       const peerObj = peersRef.current.find((p) => p.peerId === data.callerId)
       if (peerObj) {
-        peerObj.peer.signal({ type: "candidate", candidate: data.candidate })
+        peerObj.peer.signal({type: "candidate", candidate: data.candidate })
       }
     }
 
@@ -327,34 +327,111 @@ export default function MeetingPage() {
   }, [socket, localStream, user, meetingId])
 
   // Configure WebRTC for low bandwidth
+  const [isLowBandwidthMode, setIsLowBandwidthMode] = useState(false)
+
   const configureLowBandwidth = useCallback(() => {
     if (!streamRef.current) return
 
-    console.log("Configuring for low bandwidth")
+    // Toggle low bandwidth mode
+    const newMode = !isLowBandwidthMode
+    setIsLowBandwidthMode(newMode)
 
-    // Reduce video resolution and bitrate
-    streamRef.current.getVideoTracks().forEach((track) => {
-      track
-        .applyConstraints({
-          width: { ideal: 320 },
-          height: { ideal: 240 },
-          frameRate: { max: 15 },
-        })
-        .catch((e) => console.error("Could not apply video constraints:", e))
-    })
+    if (newMode) {
+      console.log("Enabling low bandwidth mode - reducing outgoing stream quality")
 
-    // Update all peer connections with the optimized stream
-    peersRef.current.forEach(({ peer }) => {
-      try {
-        peer.removeStream(streamRef.current!)
-        peer.addStream(streamRef.current!)
-      } catch (e) {
-        console.error("Error updating stream for low bandwidth:", e)
+      // Reduce video resolution and bitrate for outgoing stream
+      streamRef.current.getVideoTracks().forEach((track) => {
+        if (track.getConstraints() && track.applyConstraints) {
+          // Apply very low quality constraints for outgoing video
+          track
+            .applyConstraints({
+              width: { ideal: 320 },
+              height: { ideal: 180 },
+              frameRate: { max: 10 },
+            })
+            .catch((e) => console.error("Could not apply video constraints:", e))
+        }
+      })
+
+      // Update all peer connections with the optimized stream
+      peersRef.current.forEach(({ peer }) => {
+        try {
+          peer.removeStream(streamRef.current!)
+          peer.addStream(streamRef.current!)
+        } catch (e) {
+          console.error("Error updating stream for low bandwidth:", e)
+        }
+      })
+
+      toast.success("Low bandwidth mode enabled - reduced outgoing video quality")
+    } else {
+      console.log("Disabling low bandwidth mode - restoring outgoing stream quality")
+
+      // Restore higher quality video
+      streamRef.current.getVideoTracks().forEach((track) => {
+        if (track.getConstraints() && track.applyConstraints) {
+          // Apply higher quality constraints
+          track
+            .applyConstraints({
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+              frameRate: { max: 30 },
+            })
+            .catch((e) => console.error("Could not apply video constraints:", e))
+        }
+      })
+
+      // Update all peer connections with the restored stream
+      peersRef.current.forEach(({ peer }) => {
+        try {
+          peer.removeStream(streamRef.current!)
+          peer.addStream(streamRef.current!)
+        } catch (e) {
+          console.error("Error updating stream for normal bandwidth:", e)
+        }
+      })
+
+      toast.success("Normal quality mode enabled")
+    }
+  }, [isLowBandwidthMode])
+
+  // Monitor connection quality and suggest low bandwidth mode if needed
+  useEffect(() => {
+    if (!streamRef.current || isLowBandwidthMode) return
+
+    let connectionIssuesCount = 0
+    const connectionCheckInterval = setInterval(() => {
+      // Check if we have any failed peer connections
+      const failedConnections = peersRef.current.filter((p) => {
+        try {
+          // This is a simple check - in a real app you might use more sophisticated detection
+          return !p.peer.connected
+        } catch (e) {
+          console.error("Error checking peer connection:", e)
+          return true // Count as failed if we can't determine
+        }
+      })
+
+      if (failedConnections.length > 0) {
+        connectionIssuesCount++
+        console.log(`Connection issues detected (${connectionIssuesCount})`)
+
+        // After 3 consecutive issues, suggest low bandwidth mode
+        if (connectionIssuesCount >= 3) {
+          toast(
+
+            "Connection issues detected, Consider enabling low bandwidth mode to improve stability",
+            )
+          clearInterval(connectionCheckInterval)
+        }
+      } else {
+        // Reset counter if connections are good
+        connectionIssuesCount = 0
       }
-    })
+    }, 10000) // Check every 10 seconds
 
-    toast.success("Optimized for slow connection")
-  }, [])
+    return () => clearInterval(connectionCheckInterval)
+  }, [streamRef.current, isLowBandwidthMode, configureLowBandwidth])
 
   // Create a peer connection (initiator)
   const createPeer = (userToSignal: string, callerId: string, stream: MediaStream) => {
@@ -683,11 +760,20 @@ export default function MeetingPage() {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="outline" size="icon" onClick={configureLowBandwidth}>
+                <Button
+                  variant={isLowBandwidthMode ? "default" : "outline"}
+                  size="icon"
+                  onClick={configureLowBandwidth}
+                  className={isLowBandwidthMode ? "bg-amber-500 hover:bg-amber-600" : ""}
+                >
                   <WifiOff className="h-5 w-5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Optimize for slow connection</TooltipContent>
+              <TooltipContent>
+                {isLowBandwidthMode
+                  ? "Currently in low bandwidth mode - click to restore quality"
+                  : "Optimize for slow connection (reduces outgoing video quality)"}
+              </TooltipContent>
             </Tooltip>
           </TooltipProvider>
 
@@ -713,9 +799,14 @@ export default function MeetingPage() {
             <div className="relative group">
               <div className={cn("bg-muted rounded-lg overflow-hidden", getVideoHeight())}>
                 <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+                {isLowBandwidthMode && (
+                  <div className="absolute top-2 right-2 bg-amber-500 text-white px-2 py-1 rounded text-xs">
+                    Low Quality
+                  </div>
+                )}
               </div>
               <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
-                You {isHandRaised && "✋"}
+                You {isHandRaised && "✋"} {isLowBandwidthMode && "📶"}
               </div>
             </div>
 

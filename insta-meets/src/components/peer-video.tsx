@@ -33,6 +33,8 @@ export const PeerVideo = ({ peer, username, hasHandRaised, className, onReconnec
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+        //lowers the quality of the video if the connection is slow
+        
         setHasStream(true)
 
         // Check if video tracks are enabled
@@ -162,10 +164,6 @@ export const PeerVideo = ({ peer, username, hasHandRaised, className, onReconnec
           autoPlay
           playsInline
           className="w-full h-full object-cover"
-          // Lower quality for slow connections
-          {...(connectionState === "slow" && {
-            style: { filter: "blur(2px)" },
-          })}
         />
         {renderConnectionState()}
       </div>

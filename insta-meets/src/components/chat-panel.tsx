@@ -11,6 +11,7 @@ interface ChatPanelProps {
 
 const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMessage }) => {
   const [newMessage, setNewMessage] = useState("")
+  const [lastMessage, setLastMessage] = useState("")
   const chatContainerRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = useCallback(() => {
@@ -29,8 +30,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMes
   }
 
   const handleSendMessage = () => {
-    if (newMessage.trim() !== "") {
+    if (newMessage.trim() !== "" && newMessage !== lastMessage) {
       onSendMessage(newMessage)
+      setLastMessage(newMessage)
       setNewMessage("")
     }
   }
@@ -43,7 +45,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMes
   return (
     <div className="flex flex-col h-full">
       <div ref={chatContainerRef} className="flex-grow overflow-y-auto p-4">
-        {messages.map((message, index) => (
+        {messages.filter(message => message.senderId !== "currentUserId").map((message, index) => (
           <div key={index} className="mb-2">
             <span className="font-bold">{getParticipantName(message.senderId)}:</span> {message.content}
           </div>
@@ -60,6 +62,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMes
           />
           <button
             className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            type="button"
             onClick={handleSendMessage}
           >
             Send
@@ -71,4 +74,3 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMes
 }
 
 export default ChatPanel
-
