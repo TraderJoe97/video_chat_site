@@ -999,7 +999,7 @@ export default function MeetingPage() {
 
  // if not authenticated and theres is no name in the search params return join-meeting-modal
   if (!isAuthenticated && !guestName) {
-    return <JoinMeetingModal meetingId={meetingId} isOpen={isOpen} onClose={onClose} />
+    return <JoinMeetingModal meetingId={meetingId} isOpen={true} onClose={() => {}} />
   }
 
   return (
