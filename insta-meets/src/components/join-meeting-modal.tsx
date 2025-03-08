@@ -83,7 +83,7 @@ export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModa
 
           <TabsContent value="signin" className="space-y-4 py-4">
             <p className="text-sm text-muted-foreground">
-              Sign in to your account to join the meeting. You'll be able to access all features.
+              Sign in to your account to join the meeting. You&apos;ll be able to access all features.
             </p>
             <DialogFooter>
               <Button onClick={handleSignIn}>Sign In</Button>
