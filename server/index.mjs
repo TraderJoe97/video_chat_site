@@ -323,7 +323,7 @@ setInterval(() => {
       console.log(`Meeting ${meetingId} removed from active meetings (no users left)`)
     }
   }
-}, 10 * 1000) // Every 10 seconds
+}, 60 * 60 * 1000) // Every hour
 
 // Start the server
 server.listen(PORT, () => {
