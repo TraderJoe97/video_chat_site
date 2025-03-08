@@ -106,7 +106,7 @@ export default function MeetingPage() {
       } else {
         JoinMeetingModal({meetingId: meetingId,isOpen: true, onClose: MeetingPage})
       }
-      // The redirect is now handled by the parent component
+     
     }
   }, [isLoading, isAuthenticated, user, guestName]);
 
