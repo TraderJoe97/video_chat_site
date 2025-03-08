@@ -186,7 +186,7 @@ export default function MeetingPage() {
 
       return peer
     },
-    [socket, localStream, id],
+    [socket, id],
   )
 
   const addPeer = useCallback(
