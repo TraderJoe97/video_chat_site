@@ -104,7 +104,7 @@ export default function MeetingPage() {
         setUserId(`guest-${Date.now()}`);
         setUsername(guestName);
       } else {
-        JoinMeetingModal(meetingId,true, MeetingPage)
+        JoinMeetingModal({meetingId: meetingId,isOpen: true, onClose: MeetingPage})
       }
       // The redirect is now handled by the parent component
     }
