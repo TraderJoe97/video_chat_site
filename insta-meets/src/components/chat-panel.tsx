@@ -7,10 +7,9 @@ interface ChatPanelProps {
   messages: { senderId: string; content: string; timestamp?: string }[]
   participants: { id: string; name: string }[]
   onSendMessage: (message: string) => void
-  currentUserId: string // Add this prop to identify the current user
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMessage, currentUserId }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMessage, }) => {
   const [newMessage, setNewMessage] = useState("")
   const [lastMessage, setLastMessage] = useState("")
   const chatContainerRef = useRef<HTMLDivElement>(null)

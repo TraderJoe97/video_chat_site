@@ -962,7 +962,6 @@ export default function MeetingPage() {
                   messages={messages}
                   participants={participants}
                   onSendMessage={sendMessage}
-                  currentUserId={userId} // Pass current user ID to filter out own messages
                 />
               </TabsContent>
 
