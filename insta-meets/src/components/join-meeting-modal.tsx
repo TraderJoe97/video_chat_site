@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
 import {
@@ -28,12 +28,13 @@ export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModa
   const router = useRouter()
   const { loginWithRedirect, isAuthenticated, isLoading, user } = useAuth0()
 
-  // If user is already authenticated, redirect to meeting
-  if (!isLoading && isAuthenticated && user) {
-    router.push(`/meeting/${meetingId}?name=${encodeURIComponent(user.name)}`)
-    onClose()
-    return null
-  }
+  useEffect(() => {
+    // If user is already authenticated, redirect to meeting
+    if (!isLoading && isAuthenticated && user) {
+      router.push(`/meeting/${meetingId}?name=${encodeURIComponent(user.name || "Guest")}`)
+      onClose()
+    }
+  }, [isLoading, isAuthenticated, user, meetingId, router, onClose])
 
   const handleGuestJoin = () => {
     if (guestName.trim()) {
@@ -94,4 +95,3 @@ export function JoinMeetingModal({ meetingId, isOpen, onClose }: JoinMeetingModa
     </Dialog>
   )
 }
-
