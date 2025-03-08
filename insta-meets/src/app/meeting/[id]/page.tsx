@@ -56,7 +56,7 @@ export default function MeetingPage() {
   const guestName = searchParams.get("name")
   const router = useRouter()
   const { socket, isConnected } = useSocket()
-  const { user, isAuthenticated, loginWithRedirect, isLoading } = useAuth0()
+  const { user, isAuthenticated, isLoading } = useAuth0()
 
   // Media state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)

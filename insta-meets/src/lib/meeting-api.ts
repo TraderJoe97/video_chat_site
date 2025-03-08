@@ -99,7 +99,7 @@ export async function checkMeetingExists(meetingId: string) {
     }
 
     const meetings = await response.json()
-    return meetings.some((meeting: any) => meeting.meetingId === meetingId)
+    return meetings.some((meeting: { meetingId: string }) => meeting.meetingId === meetingId)
   } catch (error) {
     console.error("Error checking if meeting exists:", error)
     return true // Assume meeting exists if we can't check
