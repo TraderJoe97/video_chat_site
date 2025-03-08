@@ -78,6 +78,7 @@ export default function MeetingPage() {
   const [elapsedTime, setElapsedTime] = useState("00:00:00")
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isConnecting, setIsConnecting] = useState(true)
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({})
 
   const peersRef = useRef<Record<string, Peer.Instance>>({})
   const userIdRef = useRef<string>("")
@@ -143,46 +144,54 @@ export default function MeetingPage() {
         return null
       }
 
-      const peer = new Peer({
-        initiator: true,
-        trickle: false,
-      })
-
-      peer.on("signal", (data: Peer.SignalData) => {
-        console.log(`Sending offer to ${userId}`, data.type || "candidate")
-        socket?.emit("offer", {
-          meetingId: id,
-          callerId: userIdRef.current,
-          userId: userId,
-          offer: data,
+      try {
+        // Fix: Set trickle to true for better connection establishment
+        const peer = new Peer({
+          initiator: true,
+          trickle: true,
+          config: {
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:global.stun.twilio.com:3478" }],
+          },
         })
-      })
 
-      peer.on("stream", (stream: MediaStream) => {
-        console.log(`Received stream from ${userId}`)
-        // Handle the incoming stream (e.g., update UI to show the new video)
-        const videoElement = document.createElement("video")
-        videoElement.srcObject = stream
-        videoElement.autoplay = true
-        videoElement.className = "h-full w-full rounded-lg shadow-lg object-cover bg-black"
-        document.getElementById("video-grid")?.appendChild(videoElement)
-      })
+        peer.on("signal", (data: Peer.SignalData) => {
+          console.log(`Sending offer to ${userId}`, data.type || "candidate")
+          socket?.emit("offer", {
+            meetingId: id,
+            callerId: userIdRef.current,
+            userId: userId,
+            offer: data,
+          })
+        })
 
-      peer.on("error", (err: Error) => {
-        console.error("Error in peer connection:", err)
-        toast.error(`Connection error with ${userId}`)
-      })
+        peer.on("stream", (stream: MediaStream) => {
+          console.log(`Received stream from ${userId}`)
+          setRemoteStreams((prev) => ({
+            ...prev,
+            [userId]: stream,
+          }))
+        })
 
-      peer.on("close", () => {
-        console.log(`Peer connection with ${userId} closed`)
-      })
+        peer.on("error", (err: Error) => {
+          console.error("Error in peer connection:", err)
+          toast.error(`Connection error with ${userId}: ${err.message}`)
+        })
 
-      // Add tracks to the peer connection instead of the entire stream
-      localStream.getTracks().forEach((track) => {
-        peer.addTrack(track, localStream)
-      })
+        peer.on("close", () => {
+          console.log(`Peer connection with ${userId} closed`)
+        })
 
-      return peer
+        // Add tracks to the peer connection instead of the entire stream
+        localStream.getTracks().forEach((track) => {
+          peer.addTrack(track, localStream)
+        })
+
+        return peer
+      } catch (error) {
+        console.error("Error creating peer:", error)
+        toast.error("Failed to create peer connection")
+        return null
+      }
     },
     [socket, localStream, id],
   )
@@ -196,42 +205,51 @@ export default function MeetingPage() {
         return null
       }
 
-      const peer = new Peer({
-        initiator: false,
-        trickle: false,
-      })
-
-      peer.on("signal", (data: Peer.SignalData) => {
-        console.log(`Sending answer signal to ${callerId}`)
-        socket?.emit("answer", {
-          meetingId: id,
-          callerId: callerId,
-          answer: data,
+      try {
+        // Fix: Set trickle to true for better connection establishment
+        const peer = new Peer({
+          initiator: false,
+          trickle: true,
+          config: {
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:global.stun.twilio.com:3478" }],
+          },
         })
-      })
 
-      peer.on("stream", (stream: MediaStream) => {
-        console.log(`Received stream from ${callerId}`)
-        // Handle the incoming stream (e.g., update UI to show the new video)
-        const videoElement = document.createElement("video")
-        videoElement.srcObject = stream
-        videoElement.autoplay = true
-        videoElement.className = "h-full w-full rounded-lg shadow-lg object-cover bg-black"
-        document.getElementById("video-grid")?.appendChild(videoElement)
-      })
+        peer.on("signal", (data: Peer.SignalData) => {
+          console.log(`Sending answer signal to ${callerId}`)
+          socket?.emit("answer", {
+            meetingId: id,
+            callerId: callerId,
+            answer: data,
+          })
+        })
 
-      peer.on("error", (err: Error) => {
-        console.error("Error in peer connection:", err)
-      })
+        peer.on("stream", (stream: MediaStream) => {
+          console.log(`Received stream from ${callerId}`)
+          setRemoteStreams((prev) => ({
+            ...prev,
+            [callerId]: stream,
+          }))
+        })
 
-      // Add tracks to the peer connection instead of the entire stream
-      localStream.getTracks().forEach((track) => {
-        peer.addTrack(track, localStream)
-      })
+        peer.on("error", (err: Error) => {
+          console.error("Error in peer connection:", err)
+          toast.error(`Connection error: ${err.message}`)
+        })
 
-      peer.signal(incomingSignal)
+        // Add tracks to the peer connection instead of the entire stream
+        localStream.getTracks().forEach((track) => {
+          peer.addTrack(track, localStream)
+        })
 
-      return peer
+        peer.signal(incomingSignal)
+
+        return peer
+      } catch (error) {
+        console.error("Error adding peer:", error)
+        toast.error("Failed to add peer connection")
+        return null
+      }
     },
     [socket, localStream, id],
   )
@@ -319,6 +337,9 @@ export default function MeetingPage() {
           if (peer) {
             peersRef.current[data.callerId] = peer
           }
+        } else {
+          // Fix: Handle offer even if peer exists
+          peersRef.current[data.callerId].signal(data.offer)
         }
       }
     }
@@ -344,6 +365,13 @@ export default function MeetingPage() {
         peersRef.current[userId].destroy()
         delete peersRef.current[userId]
       }
+
+      // Remove remote stream when user disconnects
+      setRemoteStreams((prev) => {
+        const newStreams = { ...prev }
+        delete newStreams[userId]
+        return newStreams
+      })
 
       setParticipants((prev) => prev.filter((p) => p.id !== userId))
       toast.info(`${participants.find((p) => p.id === userId)?.name || "A participant"} left the meeting`)
@@ -381,6 +409,7 @@ export default function MeetingPage() {
       }
     }
 
+    // Fix: Ensure we're sending the correct data structure
     socket.emit("join-room", {
       meetingId: id,
       userId: userIdRef.current,
@@ -547,7 +576,10 @@ export default function MeetingPage() {
           timestamp: new Date().toISOString(),
         }
 
-        socket.emit("message", messageData)
+        socket.emit("message", {
+          meetingId: id,
+          ...messageData,
+        })
         setMessages((prev) => [...prev, messageData])
       }
     },
@@ -558,7 +590,7 @@ export default function MeetingPage() {
   const isAudioEnabled = localStream?.getAudioTracks()[0]?.enabled ?? true
 
   const getGridClass = () => {
-    const totalVideos = (isScreenSharing ? 1 : 0) + 1 + Object.keys(peersRef.current).length
+    const totalVideos = (isScreenSharing ? 1 : 0) + 1 + Object.keys(remoteStreams).length
 
     if (isScreenSharing) return "grid-cols-1"
     if (totalVideos <= 1) return "grid-cols-1"
@@ -572,7 +604,11 @@ export default function MeetingPage() {
     return (
       <div className="flex flex-col items-center justify-center h-screen">
         <h1 className="text-2xl font-bold mb-4">Connecting to server...</h1>
-        
+        <div className="flex space-x-2">
+          <div className="w-3 h-3 bg-primary rounded-full animate-bounce"></div>
+          <div className="w-3 h-3 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0.2s" }}></div>
+          <div className="w-3 h-3 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0.4s" }}></div>
+        </div>
       </div>
     )
   }
@@ -582,7 +618,7 @@ export default function MeetingPage() {
       <div className="flex flex-col items-center justify-center h-screen">
         <h1 className="text-2xl font-bold mb-4">Connection to server failed</h1>
         <p className="mb-4">Please check your internet connection and try again.</p>
-
+        <Button onClick={() => window.location.reload()}>Retry Connection</Button>
       </div>
     )
   }
@@ -630,7 +666,7 @@ export default function MeetingPage() {
               </div>
             </div>
           ) : (
-            <div className={`grid ${getGridClass()} gap-4 h-full`}>
+            <div id="video-grid" className={`grid ${getGridClass()} gap-4 h-full`}>
               {isScreenSharing && (
                 <div className="relative col-span-full row-span-2 min-h-[300px]">
                   <video
@@ -649,6 +685,7 @@ export default function MeetingPage() {
                   ref={localVideoRef}
                   autoPlay
                   muted
+                  playsInline
                   className={cn(
                     "h-full w-full rounded-lg shadow-lg object-cover bg-black",
                     !isVideoEnabled && "bg-gray-900",
@@ -659,13 +696,13 @@ export default function MeetingPage() {
                   {!isAudioEnabled && <MicOff className="h-3 w-3 text-red-500" />}
                   {participants.find((p) => p.isYou)?.hasHandRaised && <Hand className="h-3 w-3 text-yellow-500" />}
                 </div>
-                <div className="video-grid"></div>
               </div>
 
-              {Object.entries(peersRef.current).map(([userId, peer]) => (
+              {/* Render remote streams */}
+              {Object.entries(remoteStreams).map(([userId, stream]) => (
                 <div key={userId} className="relative min-h-[200px]">
                   <VideoComponent
-                    stream={peer.streams[0]}
+                    stream={stream}
                     className="h-full w-full rounded-lg shadow-lg object-cover bg-black"
                   />
                   <div className="absolute bottom-2 left-2 text-white bg-black/50 px-2 py-1 rounded text-sm flex items-center gap-1">
@@ -702,8 +739,7 @@ export default function MeetingPage() {
             </TabsList>
             <TabsContent value="chat" className="h-[calc(100%-40px)]">
               <ChatPanel
-                messages={messages.map(({ senderId, content, timestamp }) => ({ senderId, content, timestamp }))}
-                
+                messages={messages.map(({ senderId, content }) => ({ senderId, content }))}
                 onSendMessage={sendMessage}
                 participants={participants}
               />

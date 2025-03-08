@@ -19,7 +19,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
-    const backendUrl = process.env.BACKEND_URL 
+    // Use environment variable or localStorage fallback
+    const backendUrl =
+      process.env.NEXT_PUBLIC_BACKEND_URL || localStorage.getItem("NEXT_PUBLIC_BACKEND_URL") || "http://localhost:4000"
     console.log("Connecting to socket server at:", backendUrl)
 
     const newSocket = io(backendUrl, {
@@ -27,6 +29,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       timeout: 10000,
+      withCredentials: true, // Added for credentials support
     })
 
     newSocket.on("connect", () => {
@@ -42,7 +45,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     newSocket.on("connect_error", (error) => {
       console.error("Connection error:", error)
-      toast.error("Failed to connect to server")
+      toast.error(`Failed to connect to server: ${error.message}`)
     })
 
     setSocket(newSocket)
@@ -57,3 +60,4 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   return <SocketContext.Provider value={{ socket, isConnected }}>{children}</SocketContext.Provider>
 }
+
