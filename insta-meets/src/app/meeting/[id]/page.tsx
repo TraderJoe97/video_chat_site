@@ -1,43 +1,18 @@
 "use client"
 
-import { useEffect, useState, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
-import Peer from "simple-peer"
 import { useSocket } from "@/contexts/SocketContext"
-import { Button } from "@/components/ui/button"
-import {
-  Mic,
-  MicOff,
-  VideoIcon,
-  VideoOff,
-  PhoneOff,
-  ScreenShare,
-  ScreenShareOff,
-  MessageSquare,
-  Users,
-  Hand,
-  FlagOffIcon as HandOff,
-  Maximize,
-  Minimize,
-  WifiOff,
-  Share2,
-} from "lucide-react"
-import ChatPanel from "@/components/chat-panel"
-import { ParticipantsPanel } from "@/components/participants-panel"
 import { toast } from "sonner"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { cn } from "@/lib/utils"
-import { PeerVideo } from "@/components/peer-video"
 import { JoinMeetingModal } from "@/components/join-meeting-modal"
-
-interface PeerConnection {
-  peerId: string
-  peer: Peer.Instance
-  stream?: MediaStream
-  username: string
-}
+import { fetchTurnServers } from "@/lib/turn-servers"
+import { MeetingHeader } from "@/components/meeting/meeting-header"
+import { MeetingControls } from "@/components/meeting/meeting-controls"
+import { VideoGrid } from "@/components/meeting/video-grid"
+import { MeetingSidebar } from "@/components/meeting/meeting-sidebar"
+import { usePeerConnections } from "@/hooks/use-peer-connections"
+import type Peer from "simple-peer"
 
 interface Message {
   senderId: string
@@ -49,7 +24,6 @@ interface Participant {
   id: string
   name: string
   isYou?: boolean
-  isSpeaking?: boolean
   hasHandRaised?: boolean
 }
 
@@ -61,31 +35,115 @@ export default function MeetingPage() {
   const { socket, isConnected } = useSocket()
   const { user, isAuthenticated, isLoading } = useAuth0()
 
-  // Media state
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-  const [isVideoEnabled, setIsVideoEnabled] = useState(true)
-  const [isAudioEnabled, setIsAudioEnabled] = useState(true)
-  const [isScreenSharing, setIsScreenSharing] = useState(false)
-  const [isHandRaised, setIsHandRaised] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  // Refs
+  const containerRef = useRef<HTMLDivElement>(null)
+  const localVideoRef = useRef<HTMLVideoElement>(null)
 
   // UI state
-  const [activeTab, setActiveTab] = useState<string>("chat")
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>("chat")
+  const [isLoadingIceServers, setIsLoadingIceServers] = useState(true)
 
-  // Meeting state
-  const [peers, setPeers] = useState<PeerConnection[]>([])
-  const [messages, setMessages] = useState<Message[]>([])
-  const [participants, setParticipants] = useState<Participant[]>([])
+  // User state
   const [userId, setUserId] = useState<string>("")
   const [username, setUsername] = useState<string>("")
   const [isJoined, setIsJoined] = useState(false)
+  const [isHandRaised, setIsHandRaised] = useState(false)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [participants, setParticipants] = useState<Participant[]>([])
 
-  // Refs
-  const peersRef = useRef<PeerConnection[]>([])
-  const localVideoRef = useRef<HTMLVideoElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  // Media state
+  const [isAudioOnlyMode, setIsAudioOnlyMode] = useState(false)
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true)
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true)
+  const [isLowBandwidthMode, setIsLowBandwidthMode] = useState(false)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [localAudioStream, setLocalAudioStream] = useState<MediaStream | null>(null)
+
+  // Stream refs for consistent access
   const streamRef = useRef<MediaStream | null>(null)
+  const audioStreamRef = useRef<MediaStream | null>(null)
+
+  // Peer connections state from custom hook
+  const { peers, peersRef, createPeer, addPeer, handlePeerReconnect, setPeers, setIceServers } = usePeerConnections({
+    meetingId,
+    userId,
+    socket,
+    isAudioOnlyMode,
+    streamRef,
+    audioStreamRef,
+  })
+
+  // Toggle audio-only mode
+  const toggleAudioOnlyMode = useCallback(() => {
+    if (!streamRef.current && !audioStreamRef.current) {
+      toast.error("No media streams available")
+      return
+    }
+
+    const newMode = !isAudioOnlyMode
+    setIsAudioOnlyMode(newMode)
+
+    console.log(`[Meeting] ${newMode ? "Enabling" : "Disabling"} audio-only mode`)
+
+    // Reconnect all peers with the appropriate stream
+    peersRef.current.forEach(({ username }) => {
+      try {
+        console.log(`[Meeting] Reconnecting peer ${username} with ${newMode ? "audio-only" : "audio+video"} stream`)
+        handlePeerReconnect(username)
+      } catch (e) {
+        console.error(`[Meeting] Error updating stream for ${username}:`, e)
+      }
+    })
+
+    toast.success(`${newMode ? "Audio-only" : "Audio and video"} mode enabled`)
+  }, [isAudioOnlyMode, handlePeerReconnect, peersRef])
+
+  // Fetch TURN servers
+  useEffect(() => {
+    const getTurnServers = async () => {
+      setIsLoadingIceServers(true)
+      try {
+        console.log("[Meeting] Fetching TURN servers")
+        const servers = await fetchTurnServers()
+        console.log("[Meeting] Successfully fetched TURN servers:", servers)
+        setIceServers(servers)
+      } catch (error) {
+        console.error("[Meeting] Error fetching TURN servers:", error)
+        toast.error("Failed to fetch TURN servers, using fallback servers")
+
+        // Set fallback servers
+        setIceServers([
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+          { urls: "stun:stun2.l.google.com:19302" },
+          { urls: "stun:stun3.l.google.com:19302" },
+          { urls: "stun:stun4.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+          {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443?transport=tcp",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+        ])
+      } finally {
+        setIsLoadingIceServers(false)
+      }
+    }
+
+    getTurnServers()
+  }, [setIceServers])
 
   // Determine if user is guest or authenticated
   useEffect(() => {
@@ -117,39 +175,60 @@ export default function MeetingPage() {
 
   // Initialize media and join meeting
   useEffect(() => {
-    // Only proceed if we have user info and socket connection
-    if (!userId || !username || !socket || !isConnected) return
+    // Only proceed if we have user info, socket connection, and ice servers
+    if (!userId || !username || !socket || !isConnected || isLoadingIceServers) return
 
     console.log(`[Meeting] Initializing media and joining meeting ${meetingId}`)
 
     const initializeMediaAndJoinMeeting = async () => {
       try {
         console.log("[Meeting] Requesting media devices...")
+
+        // Get both audio and video streams
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
         })
 
         console.log(
           `[Meeting] Media access granted - Video tracks: ${stream.getVideoTracks().length}, Audio tracks: ${stream.getAudioTracks().length}`,
         )
 
+        // Create a separate audio-only stream
+        const audioTrack = stream.getAudioTracks()[0]
+        if (audioTrack) {
+          const audioOnlyStream = new MediaStream([audioTrack])
+          setLocalAudioStream(audioOnlyStream)
+          audioStreamRef.current = audioOnlyStream
+        }
+
         // Store stream in ref for consistent access
         streamRef.current = stream
 
-        if (localVideoRef.current) {
-          console.log("[Meeting] Setting local video stream")
-          localVideoRef.current.srcObject = stream
-        } else {
-          console.error("[Meeting] Local video ref is null")
-        }
+if (localVideoRef.current) {
+  console.log("[Meeting] Setting local video stream")
+  if (localVideoRef.current instanceof HTMLVideoElement) {
+    localVideoRef.current.srcObject = stream
+  } else {
+    console.error("[Meeting] localVideoRef.current is not an instance of HTMLVideoElement")
+  }
+} else {
+  console.error("[Meeting] Local video ref is null")
+}
 
         setLocalStream(stream)
         setIsVideoEnabled(true)
         setIsAudioEnabled(true)
 
         // Add yourself to participants
-        const currentUser: Participant = {
+        const currentUser = {
           id: userId,
           name: username,
           isYou: true,
@@ -174,30 +253,73 @@ export default function MeetingPage() {
         console.error("[Meeting] Failed to get media devices:", error)
         toast.error("Failed to access camera or microphone")
 
-        // Join without media as a fallback
-        console.log("[Meeting] Joining meeting without media as fallback")
+        // Try to get audio only as fallback
+        try {
+          console.log("[Meeting] Attempting to get audio only as fallback")
+          const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          })
 
-        // Add yourself to participants
-        const currentUser: Participant = {
-          id: userId,
-          name: username,
-          isYou: true,
+          setLocalAudioStream(audioOnlyStream)
+          audioStreamRef.current = audioOnlyStream
+          setIsAudioOnlyMode(true)
+          setIsVideoEnabled(false)
+          setIsAudioEnabled(true)
+
+          // Add yourself to participants
+          const currentUser = {
+            id: userId,
+            name: username,
+            isYou: true,
+          }
+
+          setParticipants((prev) => {
+            if (prev.some((p) => p.id === currentUser.id)) return prev
+            return [...prev, currentUser]
+          })
+
+          // Join the meeting room with audio only
+          console.log(`[Meeting] Joining room ${meetingId} as ${username} (${userId}) with audio only`)
+          socket.emit("join-room", {
+            meetingId,
+            userId,
+            username,
+          })
+
+          setIsJoined(true)
+          toast.success("Joined meeting with audio only")
+        } catch (audioError) {
+          console.error("[Meeting] Failed to get audio devices:", audioError)
+
+          // Join without media as a last resort
+          console.log("[Meeting] Joining meeting without media as fallback")
+
+          // Add yourself to participants
+          const currentUser = {
+            id: userId,
+            name: username,
+            isYou: true,
+          }
+
+          setParticipants((prev) => {
+            if (prev.some((p) => p.id === currentUser.id)) return prev
+            return [...prev, currentUser]
+          })
+
+          // Join the meeting room without media
+          socket.emit("join-room", {
+            meetingId,
+            userId,
+            username,
+          })
+
+          setIsJoined(true)
+          toast.warning("Joined meeting without camera/microphone")
         }
-
-        setParticipants((prev) => {
-          if (prev.some((p) => p.id === currentUser.id)) return prev
-          return [...prev, currentUser]
-        })
-
-        // Join the meeting room without media
-        socket.emit("join-room", {
-          meetingId,
-          userId,
-          username,
-        })
-
-        setIsJoined(true)
-        toast.warning("Joined meeting without camera/microphone")
       }
     }
 
@@ -209,6 +331,11 @@ export default function MeetingPage() {
       if (streamRef.current) {
         console.log("[Meeting] Stopping all media tracks")
         streamRef.current.getTracks().forEach((track) => track.stop())
+      }
+
+      if (audioStreamRef.current) {
+        console.log("[Meeting] Stopping all audio tracks")
+        audioStreamRef.current.getTracks().forEach((track) => track.stop())
       }
 
       // Disconnect peers
@@ -226,11 +353,11 @@ export default function MeetingPage() {
         })
       }
     }
-  }, [isConnected, socket, userId, username, meetingId])
+  }, [isConnected, socket, userId, username, meetingId, isLoadingIceServers, peersRef, createPeer, addPeer])
 
   // Socket event handlers
   useEffect(() => {
-    if (!socket || !userId || !isJoined) return
+    if (!socket || !userId || !isJoined || isLoadingIceServers) return
 
     console.log("[Meeting] Setting up socket event handlers")
 
@@ -245,9 +372,11 @@ export default function MeetingPage() {
       })
 
       // Create a new peer connection if we have a stream
-      if (streamRef.current) {
+      const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
+
+      if (streamToUse) {
         console.log(`[Meeting] Creating peer connection to ${data.username} (${data.userId})`)
-        const peer = createPeer(data.userId, userId, streamRef.current)
+        const peer = createPeer(data.userId, userId, streamToUse)
 
         peersRef.current.push({
           peerId: data.userId,
@@ -273,7 +402,9 @@ export default function MeetingPage() {
       console.log(`[Meeting] Received ${participants.length} existing participants`)
 
       // Only proceed if we have a stream
-      if (!streamRef.current) {
+      const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
+
+      if (!streamToUse) {
         console.log("[Meeting] No local stream available, skipping peer creation for existing participants")
 
         // Still add participants to the list
@@ -298,7 +429,7 @@ export default function MeetingPage() {
 
         // Create a new peer connection
         console.log(`[Meeting] Creating peer connection to ${participant.username} (${participant.userId})`)
-        const peer = createPeer(participant.userId, userId, streamRef.current!)
+        const peer = createPeer(participant.userId, userId, streamToUse)
 
         peersRef.current.push({
           peerId: participant.userId,
@@ -339,13 +470,15 @@ export default function MeetingPage() {
     const handleOffer = (data: { callerId: string; offer: Peer.SignalData }) => {
       console.log(`[Meeting] Received offer from: ${data.callerId}`)
 
-      if (!streamRef.current) {
+      const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
+
+      if (!streamToUse) {
         console.log(`[Meeting] No local stream available, cannot answer offer from ${data.callerId}`)
         return
       }
 
       console.log(`[Meeting] Creating answer peer for ${data.callerId}`)
-      const peer = addPeer(data.callerId, userId, data.offer, streamRef.current)
+      const peer = addPeer(data.callerId, userId, data.offer, streamToUse)
 
       const peerObj = peersRef.current.find((p) => p.peerId === data.callerId)
       const username = peerObj?.username || data.callerId
@@ -429,13 +562,23 @@ export default function MeetingPage() {
       socket.off("createMessage", handleMessage)
       socket.off("raise-hand", handleRaiseHand)
     }
-  }, [socket, userId, isJoined, meetingId])
+  }, [
+    socket,
+    userId,
+    isJoined,
+    meetingId,
+    isLoadingIceServers,
+    isAudioOnlyMode,
+    createPeer,
+    addPeer,
+    peersRef,
+    setPeers,
+    toggleAudioOnlyMode,
+  ])
 
   // Configure WebRTC for low bandwidth
-  const [isLowBandwidthMode, setIsLowBandwidthMode] = useState(false)
-
   const configureLowBandwidth = useCallback(() => {
-    if (!streamRef.current) {
+    if (!streamRef.current && !audioStreamRef.current) {
       toast.error("No media stream available")
       return
     }
@@ -447,33 +590,48 @@ export default function MeetingPage() {
     if (newMode) {
       console.log("[Meeting] Enabling low bandwidth mode - reducing outgoing stream quality")
 
-      // Reduce video resolution and bitrate for outgoing stream
-      streamRef.current.getVideoTracks().forEach((track) => {
-        if (track.getConstraints() && track.applyConstraints) {
-          // Apply very low quality constraints for outgoing video
-          track
-            .applyConstraints({
-              width: { ideal: 320 },
-              height: { ideal: 180 },
-              frameRate: { max: 10 },
-            })
-            .then(() => {
-              console.log("[Meeting] Successfully applied low bandwidth constraints")
-            })
-            .catch((e) => {
-              console.error("[Meeting] Could not apply video constraints:", e)
-              toast.error("Failed to reduce video quality")
-            })
-        }
-      })
+      // If we have video, reduce its quality
+      if (streamRef.current && streamRef.current.getVideoTracks().length > 0) {
+        streamRef.current.getVideoTracks().forEach((track) => {
+          if (track.getConstraints() && track.applyConstraints) {
+            // Apply very low quality constraints for outgoing video
+            track
+              .applyConstraints({
+                width: { ideal: 160 },
+                height: { ideal: 120 },
+                frameRate: { max: 8 },
+              })
+              .then(() => {
+                console.log("[Meeting] Successfully applied low bandwidth constraints")
+              })
+              .catch((e) => {
+                console.error("[Meeting] Could not apply video constraints:", e)
+                toast.error("Failed to reduce video quality")
+              })
+          }
+        })
+      }
+
+      // Consider switching to audio-only mode for very low bandwidth
+      if (!isAudioOnlyMode) {
+        toast(
+          <div className="flex flex-col gap-2">
+            <div>Consider switching to audio-only mode for even better performance</div>
+            <button onClick={toggleAudioOnlyMode} className="bg-primary text-white px-3 py-1 rounded text-sm">
+              Switch to audio-only
+            </button>
+          </div>
+        )
+      }
 
       // Update all peer connections with the optimized stream
       let updateSuccess = true
-      peersRef.current.forEach(({ peer, username }) => {
+      peersRef.current.forEach(({ username }) => {
         try {
           console.log(`[Meeting] Updating stream for ${username} to low bandwidth`)
-          peer.removeStream(streamRef.current!)
-          peer.addStream(streamRef.current!)
+          // For simple-peer, we need to recreate the connection with the new stream
+          // This is more reliable than removeStream/addStream
+          handlePeerReconnect(username)
         } catch (e) {
           console.error(`[Meeting] Error updating stream for ${username}:`, e)
           updateSuccess = false
@@ -488,33 +646,35 @@ export default function MeetingPage() {
     } else {
       console.log("[Meeting] Disabling low bandwidth mode - restoring outgoing stream quality")
 
-      // Restore higher quality video
-      streamRef.current.getVideoTracks().forEach((track) => {
-        if (track.getConstraints() && track.applyConstraints) {
-          // Apply higher quality constraints
-          track
-            .applyConstraints({
-              width: { ideal: 640 },
-              height: { ideal: 480 },
-              frameRate: { max: 30 },
-            })
-            .then(() => {
-              console.log("[Meeting] Successfully restored normal quality constraints")
-            })
-            .catch((e) => {
-              console.error("[Meeting] Could not apply video constraints:", e)
-              toast.error("Failed to restore video quality")
-            })
-        }
-      })
+      // Restore higher quality video if we have video
+      if (streamRef.current && streamRef.current.getVideoTracks().length > 0) {
+        streamRef.current.getVideoTracks().forEach((track) => {
+          if (track.getConstraints() && track.applyConstraints) {
+            // Apply higher quality constraints
+            track
+              .applyConstraints({
+                width: { ideal: 640 },
+                height: { ideal: 480 },
+                frameRate: { max: 30 },
+              })
+              .then(() => {
+                console.log("[Meeting] Successfully restored normal quality constraints")
+              })
+              .catch((e) => {
+                console.error("[Meeting] Could not apply video constraints:", e)
+                toast.error("Failed to restore video quality")
+              })
+          }
+        })
+      }
 
       // Update all peer connections with the restored stream
       let updateSuccess = true
-      peersRef.current.forEach(({ peer, username }) => {
+      peersRef.current.forEach(({ username }) => {
         try {
           console.log(`[Meeting] Updating stream for ${username} to normal quality`)
-          peer.removeStream(streamRef.current!)
-          peer.addStream(streamRef.current!)
+          // For simple-peer, we need to recreate the connection with the new stream
+          handlePeerReconnect(username)
         } catch (e) {
           console.error(`[Meeting] Error updating stream for ${username}:`, e)
           updateSuccess = false
@@ -527,11 +687,11 @@ export default function MeetingPage() {
         toast.warning("Normal quality mode partially enabled - some connections may need to be refreshed")
       }
     }
-  }, [isLowBandwidthMode])
+  }, [isLowBandwidthMode, handlePeerReconnect, isAudioOnlyMode, peersRef, toggleAudioOnlyMode])
 
   // Monitor connection quality and suggest low bandwidth mode if needed
   useEffect(() => {
-    if (!streamRef.current || isLowBandwidthMode) return
+    if ((!streamRef.current && !audioStreamRef.current) || isLowBandwidthMode) return
 
     let connectionIssuesCount = 0
     const connectionCheckInterval = setInterval(() => {
@@ -552,22 +712,18 @@ export default function MeetingPage() {
         // After 2 consecutive issues, suggest low bandwidth mode
         if (connectionIssuesCount >= 2) {
           toast(
-            () => (
-              <div className="flex flex-col gap-2">
-                <div>Connection issues detected</div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    configureLowBandwidth()
-                    toast.dismiss()
-                  }}
-                >
-                  <WifiOff className="h-4 w-4 mr-2" />
-                  Enable Low Bandwidth Mode
-                </Button>
-              </div>
-            ),
+            <div className="flex flex-col gap-2">
+              <div>Connection issues detected</div>
+              <button
+                className="bg-primary text-white px-3 py-1 rounded text-sm"
+                onClick={() => {
+                  configureLowBandwidth()
+                  toast.dismiss()
+                }}
+              >
+                Enable Low Bandwidth Mode
+              </button>
+            </div>,
             {
               duration: 10000,
             },
@@ -581,122 +737,10 @@ export default function MeetingPage() {
     }, 8000) // Check every 8 seconds
 
     return () => clearInterval(connectionCheckInterval)
-  }, [streamRef.current, isLowBandwidthMode, configureLowBandwidth])
-
-  // Create a peer connection (initiator)
-  const createPeer = (userToSignal: string, callerId: string, stream: MediaStream) => {
-    console.log(`[Meeting] Creating peer to connect with ${userToSignal} (initiator)`)
-
-    const peer = new Peer({
-      initiator: true,
-      trickle: false,
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-          { urls: "stun:stun2.l.google.com:19302" },
-          { urls: "stun:stun3.l.google.com:19302" },
-          { urls: "stun:stun4.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
-        ],
-        iceCandidatePoolSize: 10,
-      },
-      sdpTransform: (sdp) => {
-        // Modify SDP to prioritize connection establishment
-        return sdp.replace(/a=ice-options:trickle\s\n/g, "").replace(/a=candidate.*tcp.*\r\n/g, "")
-      },
-    })
-
-    // Add stream after creation to ensure proper setup
-    console.log(`[Meeting] Adding stream to peer for ${userToSignal}`)
-    peer.addStream(stream)
-
-    peer.on("signal", (signal) => {
-      console.log(`[Meeting] Generated offer signal for ${userToSignal}`)
-      socket?.emit("offer", {
-        meetingId,
-        userId: userToSignal,
-        callerId,
-        offer: signal,
-      })
-    })
-
-    peer.on("connect", () => {
-      console.log(`[Meeting] Peer connection established with ${userToSignal}`)
-    })
-
-    peer.on("error", (err) => {
-      console.error(`[Meeting] Peer error with ${userToSignal}:`, err.message)
-    })
-
-    // Add connection state change handler
-    peer.on("iceStateChange", (state) => {
-      console.log(`[Meeting] ICE state changed for ${userToSignal}:`, state)
-    })
-
-    return peer
-  }
-
-  // Add a peer connection (receiver)
-  const addPeer = (callerId: string, userId: string, incomingSignal: Peer.SignalData, stream: MediaStream) => {
-    console.log(`[Meeting] Adding peer for ${callerId} (receiver)`)
-
-    const peer = new Peer({
-      initiator: false,
-      trickle: false,
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-          { urls: "stun:stun2.l.google.com:19302" },
-          { urls: "stun:stun3.l.google.com:19302" },
-          { urls: "stun:stun4.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
-        ],
-        iceCandidatePoolSize: 10,
-      },
-      sdpTransform: (sdp) => {
-        // Modify SDP to prioritize connection establishment
-        return sdp.replace(/a=ice-options:trickle\s\n/g, "").replace(/a=candidate.*tcp.*\r\n/g, "")
-      },
-    })
-
-    // Add stream after creation to ensure proper setup
-    console.log(`[Meeting] Adding stream to peer for ${callerId}`)
-    peer.addStream(stream)
-
-    peer.on("signal", (signal) => {
-      console.log(`[Meeting] Generated answer signal for ${callerId}`)
-      socket?.emit("answer", {
-        meetingId,
-        callerId,
-        userId,
-        answer: signal,
-      })
-    })
-
-    peer.on("connect", () => {
-      console.log(`[Meeting] Peer connection established with ${callerId}`)
-    })
-
-    peer.on("error", (err) => {
-      console.error(`[Meeting] Peer error with ${callerId}:`, err.message)
-    })
-
-    // Add connection state change handler
-    peer.on("iceStateChange", (state) => {
-      console.log(`[Meeting] ICE state changed for ${callerId}:`, state)
-    })
-
-    // Process the incoming signal
-    console.log(`[Meeting] Processing incoming signal from ${callerId}`)
-    peer.signal(incomingSignal)
-
-    return peer
-  }
+  }, [isLowBandwidthMode, configureLowBandwidth, peersRef])
 
   // Toggle video
-  const toggleVideo = () => {
+  const toggleVideo = useCallback(() => {
     if (streamRef.current) {
       const videoTrack = streamRef.current.getVideoTracks()[0]
       if (videoTrack) {
@@ -705,107 +749,25 @@ export default function MeetingPage() {
         console.log(`[Meeting] Video ${videoTrack.enabled ? "enabled" : "disabled"}`)
       }
     }
-  }
+  }, [])
 
   // Toggle audio
-  const toggleAudio = () => {
-    if (streamRef.current) {
-      const audioTrack = streamRef.current.getAudioTracks()[0]
+  const toggleAudio = useCallback(() => {
+    // Determine which stream to use for toggling audio
+    const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
+
+    if (streamToUse) {
+      const audioTrack = streamToUse.getAudioTracks()[0]
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled
         setIsAudioEnabled(audioTrack.enabled)
         console.log(`[Meeting] Audio ${audioTrack.enabled ? "enabled" : "disabled"}`)
       }
     }
-  }
-
-  // Toggle screen sharing
-  const toggleScreenSharing = async () => {
-    if (isScreenSharing) {
-      console.log("[Meeting] Stopping screen sharing")
-      // Stop screen sharing and revert to camera
-      if (streamRef.current) {
-        const videoTrack = streamRef.current.getVideoTracks()[0]
-        if (videoTrack) {
-          videoTrack.stop()
-        }
-      }
-
-      try {
-        const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        console.log("[Meeting] Reverting to camera")
-
-        streamRef.current = newStream
-
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = newStream
-        }
-
-        setLocalStream(newStream)
-        setIsScreenSharing(false)
-
-        // Update all peer connections with the new stream
-        peersRef.current.forEach(({ peer }) => {
-          try {
-            peer.removeStream(streamRef.current!)
-            peer.addStream(newStream)
-            console.log("[Meeting] Updated peer with camera stream")
-          } catch (error) {
-            console.error("[Meeting] Error updating peer after screen share:", error)
-          }
-        })
-      } catch (error) {
-        console.error("[Meeting] Error reverting to camera:", error)
-        toast.error("Failed to revert to camera")
-      }
-    } else {
-      // Start screen sharing
-      try {
-        console.log("[Meeting] Starting screen sharing")
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true })
-
-        // Keep audio from the original stream
-        if (streamRef.current) {
-          const audioTrack = streamRef.current.getAudioTracks()[0]
-          if (audioTrack) {
-            screenStream.addTrack(audioTrack)
-          }
-        }
-
-        streamRef.current = screenStream
-
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = screenStream
-        }
-
-        setLocalStream(screenStream)
-        setIsScreenSharing(true)
-
-        // Update all peer connections with the new stream
-        peersRef.current.forEach(({ peer }) => {
-          try {
-            peer.removeStream(streamRef.current!)
-            peer.addStream(screenStream)
-            console.log("[Meeting] Updated peer with screen sharing stream")
-          } catch (error) {
-            console.error("[Meeting] Error updating peer with screen share:", error)
-          }
-        })
-
-        // Handle the case when user stops sharing via the browser UI
-        screenStream.getVideoTracks()[0].onended = () => {
-          console.log("[Meeting] Screen sharing stopped via browser UI")
-          toggleScreenSharing()
-        }
-      } catch (error) {
-        console.error("[Meeting] Error sharing screen:", error)
-        toast.error("Failed to share screen")
-      }
-    }
-  }
+  }, [isAudioOnlyMode])
 
   // Toggle hand raise
-  const toggleHandRaise = () => {
+  const toggleHandRaise = useCallback(() => {
     if (!socket || !userId) return
 
     const newState = !isHandRaised
@@ -821,10 +783,10 @@ export default function MeetingPage() {
 
     // Update local participant state
     setParticipants((prev) => prev.map((p) => (p.isYou ? { ...p, hasHandRaised: newState } : p)))
-  }
+  }, [isHandRaised, socket, userId, meetingId])
 
   // Toggle fullscreen
-  const toggleFullscreen = () => {
+  const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return
 
     if (!document.fullscreenElement) {
@@ -836,53 +798,18 @@ export default function MeetingPage() {
       document.exitFullscreen()
       setIsFullscreen(false)
     }
-  }
-
-  // Share meeting link
-  const shareMeetingLink = async () => {
-    const meetingUrl = `${window.location.origin}/meeting/${meetingId}`
-
-    // Check if the Web Share API is supported
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "Join my meeting",
-          text: `Join my meeting: ${username}'s meeting`,
-          url: meetingUrl,
-        })
-        console.log("[Meeting] Successfully shared meeting link")
-        toast.success("Meeting link shared successfully")
-      } catch (error) {
-        console.error("[Meeting] Error sharing meeting link:", error)
-        // Fallback to clipboard if sharing was cancelled or failed
-        copyToClipboard(meetingUrl)
-      }
-    } else {
-      // Fallback for browsers that don't support the Web Share API
-      copyToClipboard(meetingUrl)
-    }
-  }
-
-  // Copy meeting link to clipboard
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        console.log("[Meeting] Meeting link copied to clipboard")
-        toast.success("Meeting link copied to clipboard")
-      })
-      .catch((error) => {
-        console.error("[Meeting] Failed to copy meeting link:", error)
-        toast.error("Failed to copy meeting link")
-      })
-  }
+  }, [])
 
   // Leave meeting
-  const leaveMeeting = () => {
+  const leaveMeeting = useCallback(() => {
     console.log("[Meeting] Leaving meeting")
     // Stop all tracks
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop())
+    }
+
+    if (localAudioStream) {
+      localAudioStream.getTracks().forEach((track) => track.stop())
     }
 
     // Disconnect peers
@@ -904,306 +831,103 @@ export default function MeetingPage() {
     } else {
       router.push("/join")
     }
-  }
+  }, [localStream, localAudioStream, socket, userId, meetingId, isAuthenticated, router, peersRef])
 
   // Send chat message
-  const sendMessage = (content: string) => {
-    if (!socket || !userId) return
+  const sendMessage = useCallback(
+    (content: string) => {
+      if (!socket || !userId) return
 
-    console.log(`[Meeting] Sending message: ${content}`)
-    const messageData = {
-      meetingId,
-      senderId: userId,
-      content,
-      timestamp: new Date().toISOString(),
-    }
+      console.log(`[Meeting] Sending message: ${content}`)
+      const messageData = {
+        meetingId,
+        senderId: userId,
+        content,
+        timestamp: new Date().toISOString(),
+      }
 
-    socket.emit("message", messageData)
+      socket.emit("message", messageData)
 
-    // Add to local messages
-    setMessages((prev) => [...prev, messageData])
-  }
+      // Add to local messages
+      setMessages((prev) => [...prev, messageData])
+    },
+    [socket, userId, meetingId],
+  )
 
-  // Calculate grid layout based on number of participants
-  const getGridLayout = () => {
-    const totalParticipants = peers.length + 1 // +1 for local user
-
-    if (totalParticipants === 1) {
-      return "grid-cols-1"
-    } else if (totalParticipants === 2) {
-      return "grid-cols-1 md:grid-cols-2"
-    } else if (totalParticipants <= 4) {
-      return "grid-cols-1 md:grid-cols-2"
-    } else if (totalParticipants <= 9) {
-      return "grid-cols-1 sm:grid-cols-2 md:grid-cols-3"
-    } else {
-      return "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
-    }
-  }
-
-  // Calculate video height based on number of participants
-  const getVideoHeight = () => {
-    const totalParticipants = peers.length + 1 // +1 for local user
-
-    if (totalParticipants === 1) {
-      return "h-full"
-    } else if (totalParticipants === 2) {
-      return "h-full md:h-[calc(100vh-12rem)]"
-    } else if (totalParticipants <= 4) {
-      return "h-64 md:h-[calc(50vh-6rem)]"
-    } else if (totalParticipants <= 9) {
-      return "h-48 md:h-[calc(33vh-4rem)]"
-    } else {
-      return "h-40 md:h-[calc(25vh-3rem)]"
-    }
-  }
-
-  // Function to handle peer reconnection
-  const handlePeerReconnect = (peerId: string) => {
-    console.log(`[Meeting] Attempting to reconnect with peer: ${peerId}`)
-
-    // Find and remove the existing peer
-    const peerToRemove = peersRef.current.find((p) => p.peerId === peerId)
-    if (peerToRemove) {
-      peerToRemove.peer.destroy()
-    }
-
-    peersRef.current = peersRef.current.filter((p) => p.peerId !== peerId)
-    setPeers((prev) => prev.filter((p) => p.peerId !== peerId))
-
-    // Only attempt reconnection if we have a stream
-    if (!streamRef.current) {
-      console.error("[Meeting] Cannot reconnect: No local stream available")
-      return
-    }
-
-    // Get username from participants list
-    const participant = participants.find((p) => p.id === peerId)
-    const username = participant?.name || peerId
-
-    // Create a new peer connection
-    const newPeer = createPeer(peerId, userId, streamRef.current)
-
-    // Add the new peer to our lists
-    const peerConnection = {
-      peerId,
-      peer: newPeer,
-      username,
-    }
-
-    peersRef.current.push(peerConnection)
-    setPeers((prev) => [...prev, peerConnection])
-
-    console.log(`[Meeting] Reconnection attempt initiated with ${peerId}`)
-  }
-
- // if not authenticated and theres is no name in the search params return join-meeting-modal
+  // if not authenticated and theres is no name in the search params return join-meeting-modal
   if (!isAuthenticated && !guestName) {
     return <JoinMeetingModal meetingId={meetingId} isOpen={true} onClose={() => {}} />
+  }
+
+  // Show loading state while fetching ICE servers
+  if (isLoadingIceServers) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto mb-4"></div>
+          <h2 className="text-xl font-semibold">Preparing your meeting...</h2>
+          <p className="text-muted-foreground">Setting up secure connection</p>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div ref={containerRef} className="flex flex-col h-screen bg-background">
       {/* Header */}
-      <header className="flex items-center justify-between p-4 border-b">
-        <div className="flex items-center">
-          <h1 className="text-xl font-bold mr-4">Meeting: {meetingId}</h1>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" onClick={shareMeetingLink} className="flex items-center gap-1">
-                  <Share2 className="h-4 w-4" />
-                  <span className="hidden sm:inline">Share</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Share meeting link</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-        <div className="flex items-center space-x-2">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="icon" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-                  {activeTab === "chat" ? <MessageSquare className="h-5 w-5" /> : <Users className="h-5 w-5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isSidebarOpen ? "Close sidebar" : "Open sidebar"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={isLowBandwidthMode ? "default" : "outline"}
-                  size="icon"
-                  onClick={configureLowBandwidth}
-                  className={isLowBandwidthMode ? "bg-amber-500 hover:bg-amber-600" : ""}
-                >
-                  <WifiOff className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {isLowBandwidthMode
-                  ? "Currently in low bandwidth mode - click to restore quality"
-                  : "Optimize for slow connection (reduces video quality)"}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="icon" onClick={toggleFullscreen}>
-                  {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-      </header>
+      <MeetingHeader
+        meetingId={meetingId as string}
+        isAudioOnlyMode={isAudioOnlyMode}
+        toggleAudioOnlyMode={toggleAudioOnlyMode}
+        isSidebarOpen={isSidebarOpen}
+        setIsSidebarOpen={setIsSidebarOpen}
+        activeTab={activeTab}
+        isLowBandwidthMode={isLowBandwidthMode}
+        configureLowBandwidth={configureLowBandwidth}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+      />
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Video grid */}
-        <div className={cn("flex-1 p-4 overflow-y-auto", isSidebarOpen ? "md:w-2/3" : "w-full")}>
-          <div className={cn("grid gap-4", getGridLayout())}>
-            {/* Local video */}
-            <div className="relative group">
-              <div className={cn("bg-muted rounded-lg overflow-hidden", getVideoHeight())}>
-                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-                {isLowBandwidthMode && (
-                  <div className="absolute top-2 right-2 bg-amber-500 text-white px-2 py-1 rounded text-xs">
-                    Low Quality
-                  </div>
-                )}
-              </div>
-              <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
-                You {isHandRaised && "✋"} {isLowBandwidthMode && "📶"}
-              </div>
-            </div>
-
-            {/* Remote videos */}
-            {peers.map((peer) => (
-              <PeerVideo
-                key={peer.peerId}
-                peer={peer.peer}
-                username={peer.username}
-                hasHandRaised={participants.find((p) => p.id === peer.peerId)?.hasHandRaised}
-                className={getVideoHeight()}
-                onReconnect={() => handlePeerReconnect(peer.peerId)}
-              />
-            ))}
-          </div>
-        </div>
+        {localVideoRef.current && (
+          <VideoGrid
+            isSidebarOpen={isSidebarOpen}
+            username={username}
+            isAudioOnlyMode={isAudioOnlyMode}
+            localVideoRef={localVideoRef}
+            isLowBandwidthMode={isLowBandwidthMode}
+            isHandRaised={isHandRaised}
+            peers={peers}
+            participants={participants}
+            handlePeerReconnect={handlePeerReconnect}
+          />
+        )}
 
         {/* Sidebar */}
         {isSidebarOpen && (
-          <div className="w-full md:w-1/3 border-l h-full flex flex-col">
-            <Tabs defaultValue="chat" value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-              <TabsList className="grid grid-cols-2 mx-4 my-2">
-                <TabsTrigger value="chat">Chat</TabsTrigger>
-                <TabsTrigger value="participants">Participants ({participants.length})</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="chat" className="flex-1 flex flex-col">
-                <ChatPanel
-                  messages={messages}
-                  participants={participants}
-                  onSendMessage={sendMessage}
-                 
-                />
-              </TabsContent>
-
-              <TabsContent value="participants" className="flex-1">
-                <ParticipantsPanel participants={participants} />
-              </TabsContent>
-            </Tabs>
-          </div>
+          <MeetingSidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            participants={participants}
+            messages={messages}
+            onSendMessage={sendMessage}
+          />
         )}
       </div>
 
       {/* Controls */}
-      <footer className="p-4 border-t bg-background">
-        <div className="flex items-center justify-center space-x-4">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={isAudioEnabled ? "outline" : "destructive"}
-                  size="icon"
-                  onClick={toggleAudio}
-                  className="rounded-full h-12 w-12"
-                >
-                  {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isAudioEnabled ? "Mute microphone" : "Unmute microphone"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={isVideoEnabled ? "outline" : "destructive"}
-                  size="icon"
-                  onClick={toggleVideo}
-                  className="rounded-full h-12 w-12"
-                >
-                  {isVideoEnabled ? <VideoIcon className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isVideoEnabled ? "Turn off camera" : "Turn on camera"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={isScreenSharing ? "default" : "outline"}
-                  size="icon"
-                  onClick={toggleScreenSharing}
-                  className="rounded-full h-12 w-12"
-                >
-                  {isScreenSharing ? <ScreenShareOff className="h-5 w-5" /> : <ScreenShare className="h-5 w-5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isScreenSharing ? "Stop sharing screen" : "Share screen"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={isHandRaised ? "default" : "outline"}
-                  size="icon"
-                  onClick={toggleHandRaise}
-                  className="rounded-full h-12 w-12"
-                >
-                  {isHandRaised ? <HandOff className="h-5 w-5" /> : <Hand className="h-5 w-5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isHandRaised ? "Lower hand" : "Raise hand"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="destructive" size="icon" onClick={leaveMeeting} className="rounded-full h-12 w-12">
-                  <PhoneOff className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Leave meeting</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-      </footer>
+      <MeetingControls
+        isAudioEnabled={isAudioEnabled}
+        toggleAudio={toggleAudio}
+        isVideoEnabled={isVideoEnabled}
+        toggleVideo={toggleVideo}
+        isAudioOnlyMode={isAudioOnlyMode}
+        isHandRaised={isHandRaised}
+        toggleHandRaise={toggleHandRaise}
+        leaveMeeting={leaveMeeting}
+      />
     </div>
   )
 }

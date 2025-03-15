@@ -1,93 +1,82 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef, useCallback, type ChangeEvent } from "react"
 
+import { useState, useRef, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Send } from "lucide-react"
+import { formatDistanceToNow } from "date-fns/formatDistanceToNow";
 interface ChatPanelProps {
-  messages: { senderId: string; content: string; timestamp?: string }[]
-  participants: { id: string; name: string }[]
-  onSendMessage: (message: string) => void
+  messages: {
+    senderId: string
+    content: string
+    timestamp: string
+  }[]
+  participants: {
+    id: string
+    name: string
+  }[]
+  onSendMessage: (content: string) => void
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ messages, participants, onSendMessage, }) => {
-  const [newMessage, setNewMessage] = useState("")
-  const [lastMessage, setLastMessage] = useState("")
-  const chatContainerRef = useRef<HTMLDivElement>(null)
+export default function ChatPanel({ messages, participants, onSendMessage }: ChatPanelProps) {
+  const [message, setMessage] = useState("")
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const scrollToBottom = useCallback(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTo({
-        top: chatContainerRef.current.scrollHeight,
-        behavior: "smooth",
-      })
-    }
-  }, [])
-
+  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    scrollToBottom()
-  }, [messages, scrollToBottom])
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
 
-  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setNewMessage(event.target.value)
-  }
-
-  const handleSendMessage = () => {
-    if (newMessage.trim() !== "" && newMessage !== lastMessage) {
-      onSendMessage(newMessage)
-      setLastMessage(newMessage)
-      setNewMessage("")
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (message.trim()) {
+      onSendMessage(message.trim())
+      setMessage("")
     }
   }
 
-  const handleKeyPress = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") {
-      handleSendMessage()
-    }
+  // Get participant name by ID
+  const getParticipantName = (id: string) => {
+    const participant = participants.find((p) => p.id === id)
+    return participant ? participant.name : "Unknown"
   }
-
-  const getParticipantName = (senderId: string) => {
-    const participant = participants.find((p) => p.id === senderId)
-    return participant?.name || senderId
-  }
-
-
 
   return (
     <div className="flex flex-col h-full">
-      <div ref={chatContainerRef} className="flex-grow overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
-          <div className="text-center text-muted-foreground py-8">No messages yet</div>
+          <div className="flex items-center justify-center h-full text-muted-foreground">No messages yet</div>
         ) : (
-          messages.map((message, index) => (
-            <div key={index} className="mb-3 p-2 rounded bg-muted/30">
-              <div className="font-bold">{getParticipantName(message.senderId)}</div>
-              <div>{message.content}</div>
+          messages.map((msg, index) => (
+            <div key={index} className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">{getParticipantName(msg.senderId)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatDistanceToNow(new Date(msg.timestamp), { addSuffix: true })}
+                </span>
+              </div>
+              <p className="mt-1">{msg.content}</p>
             </div>
           ))
         )}
+        <div ref={messagesEndRef} />
       </div>
       <div className="p-4 border-t">
-        <div className="flex">
-          <input
-            type="text"
-            className="flex-grow border rounded py-2 px-3 mr-2"
-            placeholder="Type your message..."
-            value={newMessage}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyPress}
+        <form onSubmit={handleSendMessage} className="flex gap-2">
+          <Input
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Type a message..."
+            className="flex-1"
           />
-          <button
-            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-            type="button"
-            onClick={handleSendMessage}
-          >
-            Send
-          </button>
-        </div>
+          <Button type="submit" size="icon" disabled={!message.trim()}>
+            <Send className="h-4 w-4" />
+          </Button>
+        </form>
       </div>
     </div>
   )
 }
-
-export default ChatPanel
 
