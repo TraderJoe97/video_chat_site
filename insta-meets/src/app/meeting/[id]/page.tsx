@@ -14,7 +14,7 @@ import { MeetingSidebar } from "@/components/meeting/meeting-sidebar"
 import { usePeerConnections } from "@/hooks/use-peer-connections"
 import type Peer from "simple-peer"
 
-interface Message {
+export interface Message {
   senderId: string
   content: string
   timestamp: string

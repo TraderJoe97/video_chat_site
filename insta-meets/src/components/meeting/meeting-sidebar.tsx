@@ -3,12 +3,14 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import ChatPanel from "@/components/chat-panel"
 import { ParticipantsPanel } from "@/components/participants-panel"
+import { Participant } from "@/components/participants-panel"
+import { Message } from "@/app/meeting/[id]/page"
 
 interface MeetingSidebarProps {
   activeTab: string
   setActiveTab: (tab: string) => void
-  participants: any[]
-  messages: any[]
+  participants: Participant[]
+  messages: Message[]
   onSendMessage: (content: string) => void
 }
 
