@@ -1,5 +1,11 @@
 "use client"
 
+declare global {
+  interface Window {
+    socketRef: { current: Socket | null }
+  }
+}
+
 import type React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { io, type Socket } from "socket.io-client"
