@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import React, { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
 import { useSocket } from "@/contexts/SocketContext"
@@ -200,7 +200,10 @@ export default function MeetingPage() {
         console.log(
           `[Meeting] Media access granted - Video tracks: ${stream.getVideoTracks().length}, Audio tracks: ${stream.getAudioTracks().length}`,
         )
-
+    setLocalStream(stream)
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream
+    }
         // Create a separate audio-only stream
         const audioTrack = stream.getAudioTracks()[0]
         if (audioTrack) {
@@ -208,7 +211,7 @@ export default function MeetingPage() {
           setLocalAudioStream(audioOnlyStream)
           audioStreamRef.current = audioOnlyStream
         }
-
+      
         // Store stream in ref for consistent access
         streamRef.current = stream
 
