@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useAuth0 } from "@auth0/auth0-react"
 import { useSocket } from "@/contexts/SocketContext"
@@ -200,10 +200,10 @@ export default function MeetingPage() {
         console.log(
           `[Meeting] Media access granted - Video tracks: ${stream.getVideoTracks().length}, Audio tracks: ${stream.getAudioTracks().length}`,
         )
-    setLocalStream(stream)
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream
-    }
+        setLocalStream(stream)
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream
+        }
         // Create a separate audio-only stream
         const audioTrack = stream.getAudioTracks()[0]
         if (audioTrack) {
@@ -211,20 +211,12 @@ export default function MeetingPage() {
           setLocalAudioStream(audioOnlyStream)
           audioStreamRef.current = audioOnlyStream
         }
-      
+
         // Store stream in ref for consistent access
         streamRef.current = stream
 
-if (localVideoRef.current) {
-  console.log("[Meeting] Setting local video stream")
-  if (localVideoRef.current instanceof HTMLVideoElement) {
-    localVideoRef.current.srcObject = stream
-  } else {
-    console.error("[Meeting] localVideoRef.current is not an instance of HTMLVideoElement")
-  }
-} else {
-  console.error("[Meeting] Local video ref is null")
-}
+        setLocalStream(stream)
+        // We'll set the srcObject in a useEffect instead
 
         setLocalStream(stream)
         setIsVideoEnabled(true)
@@ -623,7 +615,7 @@ if (localVideoRef.current) {
             <button onClick={toggleAudioOnlyMode} className="bg-primary text-white px-3 py-1 rounded text-sm">
               Switch to audio-only
             </button>
-          </div>
+          </div>,
         )
       }
 
@@ -741,6 +733,14 @@ if (localVideoRef.current) {
 
     return () => clearInterval(connectionCheckInterval)
   }, [isLowBandwidthMode, configureLowBandwidth, peersRef])
+
+  // Set local video stream when it's available
+  useEffect(() => {
+    if (localStream && localVideoRef.current) {
+      console.log("[Meeting] Setting local video stream in useEffect")
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
 
   // Toggle video
   const toggleVideo = useCallback(() => {
@@ -894,19 +894,17 @@ if (localVideoRef.current) {
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Video grid */}
-        {localVideoRef.current && (
-          <VideoGrid
-            isSidebarOpen={isSidebarOpen}
-            username={username}
-            isAudioOnlyMode={isAudioOnlyMode}
-            localVideoRef={localVideoRef}
-            isLowBandwidthMode={isLowBandwidthMode}
-            isHandRaised={isHandRaised}
-            peers={peers}
-            participants={participants}
-            handlePeerReconnect={handlePeerReconnect}
-          />
-        )}
+        <VideoGrid
+          isSidebarOpen={isSidebarOpen}
+          username={username}
+          isAudioOnlyMode={isAudioOnlyMode}
+          localVideoRef={localVideoRef}
+          isLowBandwidthMode={isLowBandwidthMode}
+          isHandRaised={isHandRaised}
+          peers={peers}
+          participants={participants}
+          handlePeerReconnect={handlePeerReconnect}
+        />
 
         {/* Sidebar */}
         {isSidebarOpen && (
