@@ -5,10 +5,10 @@
 export async function fetchTurnServers(): Promise<RTCIceServer[]> {
   console.log("[TurnServers] Attempting to fetch TURN servers from Metered")
 
-  if (!process.env.METERED_API_KEY) {
-    console.warn("[TurnServers] No Metered API key found, using fallback servers")
-    return getFallbackServers()
-  }
+  // if (!process.env.METERED_API_KEY) {
+  //   console.warn("[TurnServers] No Metered API key found, using fallback servers")
+  //   return getFallbackServers()
+  // }
 
   try {
     const response = await fetch(
