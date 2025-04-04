@@ -852,7 +852,7 @@ export default function MeetingPage() {
       socket.emit("message", messageData)
 
       // Add to local messages
-      setMessages((prev) => [...prev, messageData])
+      //setMessages((prev) => [...prev, messageData])
     },
     [socket, userId, meetingId],
   )
