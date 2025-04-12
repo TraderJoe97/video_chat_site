@@ -72,4 +72,3 @@ function getFallbackServers(): RTCIceServer[] {
     },
   ]
 }
-

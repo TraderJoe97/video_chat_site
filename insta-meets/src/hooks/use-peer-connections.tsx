@@ -38,7 +38,7 @@ export function usePeerConnections({
 
   const [peers, setPeers] = useState<PeerConnection[]>([])
   const peersRef = useRef<PeerConnection[]>([])
-  
+
   // Add a map to track peer IDs to their latest instance timestamp
   // This helps us identify outdated peer instances
   const peerTimestamps = useRef<Map<string, number>>(new Map())
@@ -83,8 +83,8 @@ export function usePeerConnections({
           if (isAudioOnlyMode && sdp.includes("m=video")) {
             // Instead of removing video section entirely, disable it
             modifiedSdp = modifiedSdp.replace(
-              /m=video.*\r\n/g, 
-              (match) => match.replace("m=video", "m=video 0") // Set port to 0 to disable
+              /m=video.*\r\n/g,
+              (match) => match.replace("m=video", "m=video 0"), // Set port to 0 to disable
             )
             // Keep the video section but mark it as inactive
             modifiedSdp = modifiedSdp.replace(/a=sendrecv/g, "a=inactive")
@@ -125,7 +125,7 @@ export function usePeerConnections({
       peer.on("close", () => {
         console.log(`[PeerConnections] Peer connection with ${userToSignal} closed`)
         // Find and mark this peer as destroyed
-        const peerObj = peersRef.current.find(p => p.peerId === userToSignal && p.createdAt === timestamp)
+        const peerObj = peersRef.current.find((p) => p.peerId === userToSignal && p.createdAt === timestamp)
         if (peerObj) {
           peerObj.isDestroyed = true
         }
@@ -171,8 +171,8 @@ export function usePeerConnections({
           if (isAudioOnlyMode && sdp.includes("m=video")) {
             // Instead of removing video section entirely, disable it
             modifiedSdp = modifiedSdp.replace(
-              /m=video.*\r\n/g, 
-              (match) => match.replace("m=video", "m=video 0") // Set port to 0 to disable
+              /m=video.*\r\n/g,
+              (match) => match.replace("m=video", "m=video 0"), // Set port to 0 to disable
             )
             // Keep the video section but mark it as inactive
             modifiedSdp = modifiedSdp.replace(/a=sendrecv/g, "a=inactive")
@@ -213,7 +213,7 @@ export function usePeerConnections({
       peer.on("close", () => {
         console.log(`[PeerConnections] Peer connection with ${callerId} closed`)
         // Find and mark this peer as destroyed
-        const peerObj = peersRef.current.find(p => p.peerId === callerId && p.createdAt === timestamp)
+        const peerObj = peersRef.current.find((p) => p.peerId === callerId && p.createdAt === timestamp)
         if (peerObj) {
           peerObj.isDestroyed = true
         }
@@ -241,10 +241,10 @@ export function usePeerConnections({
       }
 
       const peerId = peerToRemove.peerId
-      
+
       // Mark the old peer as destroyed BEFORE destroying it
       peerToRemove.isDestroyed = true
-      
+
       // Destroy the peer connection
       try {
         peerToRemove.peer.destroy()
@@ -274,7 +274,7 @@ export function usePeerConnections({
         peerId,
         peer: newPeer,
         username,
-        createdAt: timestamp
+        createdAt: timestamp,
       }
 
       peersRef.current.push(peerConnection)
@@ -282,7 +282,7 @@ export function usePeerConnections({
 
       console.log(`[PeerConnections] Reconnection attempt initiated with ${username}`)
     },
-    [isAudioOnlyMode, userId, createPeer, audioStreamRef, streamRef]
+    [isAudioOnlyMode, userId, createPeer, audioStreamRef, streamRef],
   )
 
   // Function to safely apply a signal to a peer
@@ -293,12 +293,12 @@ export function usePeerConnections({
       console.log(`[PeerConnections] No timestamp found for peer ${peerId}, cannot signal`)
       return false
     }
-    
+
     // Find the peer with matching ID and timestamp (the latest instance)
     const peerObj = peersRef.current.find(
-      p => p.peerId === peerId && p.createdAt === latestTimestamp && !p.isDestroyed
+      (p) => p.peerId === peerId && p.createdAt === latestTimestamp && !p.isDestroyed,
     )
-    
+
     if (peerObj && !peerObj.isDestroyed) {
       try {
         console.log(`[PeerConnections] Safely applying signal to peer ${peerId}`)
@@ -322,7 +322,7 @@ export function usePeerConnections({
     createPeer,
     addPeer,
     handlePeerReconnect,
-    safelySignalPeer, 
+    safelySignalPeer,
     setPeers,
     iceServers,
     setIceServers,
