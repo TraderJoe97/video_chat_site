@@ -18,6 +18,7 @@ export interface Message {
   senderId: string
   content: string
   timestamp: string
+  isFromCurrentUser?: boolean // Added flag to identify messages from current user
 }
 
 interface Participant {
@@ -66,7 +67,16 @@ export default function MeetingPage() {
   const audioStreamRef = useRef<MediaStream | null>(null)
 
   // Peer connections state from custom hook
-  const { peers, peersRef, createPeer, addPeer, handlePeerReconnect, safelySignalPeer, setPeers, setIceServers } = usePeerConnections({
+  const { 
+    peers, 
+    peersRef, 
+    createPeer, 
+    addPeer, 
+    handlePeerReconnect, 
+    safelySignalPeer, // Added this from the updated hook
+    setPeers, 
+    setIceServers 
+  } = usePeerConnections({
     meetingId,
     userId,
     socket,
@@ -351,239 +361,252 @@ export default function MeetingPage() {
   }, [isConnected, socket, userId, username, meetingId, isLoadingIceServers, peersRef, createPeer, addPeer])
 
   // Socket event handlers
-useEffect(() => {
-  if (!socket || !userId || !isJoined || isLoadingIceServers) return
+  useEffect(() => {
+    if (!socket || !userId || !isJoined || isLoadingIceServers) return
 
-  console.log("[Meeting] Setting up socket event handlers")
+    console.log("[Meeting] Setting up socket event handlers")
 
-  // Handle new user connected
-  const handleUserConnected = (data: { userId: string; username: string }) => {
-    console.log(`[Meeting] User connected: ${data.username} (${data.userId})`)
+    // Handle new user connected
+    const handleUserConnected = (data: { userId: string; username: string }) => {
+      console.log(`[Meeting] User connected: ${data.username} (${data.userId})`)
 
-    // Add to participants list
-    setParticipants((prev) => {
-      if (prev.some((p) => p.id === data.userId)) return prev
-      return [...prev, { id: data.userId, name: data.username }]
-    })
-
-    // Create a new peer connection if we have a stream
-    const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
-
-    if (streamToUse) {
-      console.log(`[Meeting] Creating peer connection to ${data.username} (${data.userId})`)
-      const peer = createPeer(data.userId, userId, streamToUse)
-
-      peersRef.current.push({
-        peerId: data.userId,
-        peer,
-        username: data.username,
-        createdAt: Date.now(),
+      // Add to participants list
+      setParticipants((prev) => {
+        if (prev.some((p) => p.id === data.userId)) return prev
+        return [...prev, { id: data.userId, name: data.username }]
       })
 
-      setPeers((prev) => [
-        ...prev,
-        {
+      // Create a new peer connection if we have a stream
+      const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
+
+      if (streamToUse) {
+        console.log(`[Meeting] Creating peer connection to ${data.username} (${data.userId})`)
+        const peer = createPeer(data.userId, userId, streamToUse)
+        const timestamp = Date.now()
+
+        peersRef.current.push({
           peerId: data.userId,
           peer,
           username: data.username,
-          createdAt: Date.now(),
-        },
-      ])
-    } else {
-      console.log(`[Meeting] No local stream available, skipping peer creation for ${data.userId}`)
+          createdAt: timestamp,
+          isDestroyed: false
+        })
+
+        setPeers((prev) => [
+          ...prev,
+          {
+            peerId: data.userId,
+            peer,
+            username: data.username,
+            createdAt: timestamp,
+            isDestroyed: false
+          },
+        ])
+      } else {
+        console.log(`[Meeting] No local stream available, skipping peer creation for ${data.userId}`)
+      }
     }
-  }
 
-  // Handle existing participants
-  const handleExistingParticipants = (participants: { userId: string; username: string }[]) => {
-    console.log(`[Meeting] Received ${participants.length} existing participants`)
+    // Handle existing participants
+    const handleExistingParticipants = (participants: { userId: string; username: string }[]) => {
+      console.log(`[Meeting] Received ${participants.length} existing participants`)
 
-    // Only proceed if we have a stream
-    const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
+      // Only proceed if we have a stream
+      const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
 
-    if (!streamToUse) {
-      console.log("[Meeting] No local stream available, skipping peer creation for existing participants")
+      if (!streamToUse) {
+        console.log("[Meeting] No local stream available, skipping peer creation for existing participants")
 
-      // Still add participants to the list
+        // Still add participants to the list
+        participants.forEach((participant) => {
+          setParticipants((prev) => {
+            if (prev.some((p) => p.id === participant.userId)) return prev
+            return [...prev, { id: participant.userId, name: participant.username }]
+          })
+        })
+
+        return
+      }
+
       participants.forEach((participant) => {
+        console.log(`[Meeting] Processing existing participant: ${participant.username} (${participant.userId})`)
+
+        // Add to participants list
         setParticipants((prev) => {
           if (prev.some((p) => p.id === participant.userId)) return prev
           return [...prev, { id: participant.userId, name: participant.username }]
         })
-      })
 
-      return
-    }
+        // Create a new peer connection
+        console.log(`[Meeting] Creating peer connection to ${participant.username} (${participant.userId})`)
+        const peer = createPeer(participant.userId, userId, streamToUse)
+        const timestamp = Date.now()
 
-    participants.forEach((participant) => {
-      console.log(`[Meeting] Processing existing participant: ${participant.username} (${participant.userId})`)
-
-      // Add to participants list
-      setParticipants((prev) => {
-        if (prev.some((p) => p.id === participant.userId)) return prev
-        return [...prev, { id: participant.userId, name: participant.username }]
-      })
-
-      // Create a new peer connection
-      console.log(`[Meeting] Creating peer connection to ${participant.username} (${participant.userId})`)
-      const peer = createPeer(participant.userId, userId, streamToUse)
-      const timestamp = Date.now()
-
-      peersRef.current.push({
-        peerId: participant.userId,
-        peer,
-        username: participant.username,
-        createdAt: timestamp,
-      })
-
-      setPeers((prev) => [
-        ...prev,
-        {
+        peersRef.current.push({
           peerId: participant.userId,
           peer,
           username: participant.username,
           createdAt: timestamp,
-        },
-      ])
-    })
-  }
+          isDestroyed: false
+        })
 
-  // Handle user disconnected
-  const handleUserDisconnected = (userId: string) => {
-    console.log(`[Meeting] User disconnected: ${userId}`)
-
-    // Remove from participants list
-    setParticipants((prev) => prev.filter((p) => p.id !== userId))
-
-    // Close and remove peer connection
-    const peerObj = peersRef.current.find((p) => p.peerId === userId)
-    if (peerObj) {
-      console.log(`[Meeting] Destroying peer connection to ${userId}`)
-      // Mark as destroyed before actually destroying
-      peerObj.isDestroyed = true
-      peerObj.peer.destroy()
-    }
-
-    peersRef.current = peersRef.current.filter((p) => p.peerId !== userId)
-    setPeers((prev) => prev.filter((p) => p.peerId !== userId))
-  }
-
-  // Handle WebRTC signaling - offer
-  const handleOffer = (data: { callerId: string; offer: Peer.SignalData }) => {
-    console.log(`[Meeting] Received offer from: ${data.callerId}`)
-
-    const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
-
-    if (!streamToUse) {
-      console.log(`[Meeting] No local stream available, cannot answer offer from ${data.callerId}`)
-      return
-    }
-
-    console.log(`[Meeting] Creating answer peer for ${data.callerId}`)
-    const peer = addPeer(data.callerId, userId, data.offer, streamToUse)
-    const timestamp = Date.now()
-
-    const peerObj = peersRef.current.find((p) => p.peerId === data.callerId)
-    const username = peerObj?.username || data.callerId
-
-    if (!peerObj) {
-      console.log(`[Meeting] Adding new peer connection for ${data.callerId}`)
-      peersRef.current.push({
-        peerId: data.callerId,
-        peer,
-        username,
-        createdAt: timestamp,
+        setPeers((prev) => [
+          ...prev,
+          {
+            peerId: participant.userId,
+            peer,
+            username: participant.username,
+            createdAt: timestamp,
+            isDestroyed: false
+          },
+        ])
       })
+    }
 
-      setPeers((prev) => [
-        ...prev,
-        {
+    // Handle user disconnected
+    const handleUserDisconnected = (userId: string) => {
+      console.log(`[Meeting] User disconnected: ${userId}`)
+
+      // Remove from participants list
+      setParticipants((prev) => prev.filter((p) => p.id !== userId))
+
+      // Close and remove peer connection
+      const peerObj = peersRef.current.find((p) => p.peerId === userId)
+      if (peerObj) {
+        console.log(`[Meeting] Destroying peer connection to ${userId}`)
+        // Mark as destroyed before actually destroying
+        peerObj.isDestroyed = true
+        peerObj.peer.destroy()
+      }
+
+      peersRef.current = peersRef.current.filter((p) => p.peerId !== userId)
+      setPeers((prev) => prev.filter((p) => p.peerId !== userId))
+    }
+
+    // Handle WebRTC signaling - offer
+    const handleOffer = (data: { callerId: string; offer: Peer.SignalData }) => {
+      console.log(`[Meeting] Received offer from: ${data.callerId}`)
+
+      const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
+
+      if (!streamToUse) {
+        console.log(`[Meeting] No local stream available, cannot answer offer from ${data.callerId}`)
+        return
+      }
+
+      console.log(`[Meeting] Creating answer peer for ${data.callerId}`)
+      const peer = addPeer(data.callerId, userId, data.offer, streamToUse)
+      const timestamp = Date.now()
+
+      const peerObj = peersRef.current.find((p) => p.peerId === data.callerId)
+      const username = peerObj?.username || data.callerId
+
+      if (!peerObj) {
+        console.log(`[Meeting] Adding new peer connection for ${data.callerId}`)
+        peersRef.current.push({
           peerId: data.callerId,
           peer,
           username,
           createdAt: timestamp,
-        },
-      ])
+          isDestroyed: false
+        })
+
+        setPeers((prev) => [
+          ...prev,
+          {
+            peerId: data.callerId,
+            peer,
+            username,
+            createdAt: timestamp,
+            isDestroyed: false
+          },
+        ])
+      }
     }
-  }
 
-  // Handle WebRTC signaling - answer
-  const handleAnswer = (data: { callerId: string; answer: Peer.SignalData }) => {
-    console.log(`[Meeting] Received answer from: ${data.callerId}`)
-    
-    // Use the new safe signaling method instead of directly accessing the peer
-    const success = safelySignalPeer(data.callerId, data.answer)
-    
-    if (!success) {
-      console.log(`[Meeting] Could not apply answer to peer ${data.callerId} - peer may be destroyed or not found`)
+    // Handle WebRTC signaling - answer
+    const handleAnswer = (data: { callerId: string; answer: Peer.SignalData }) => {
+      console.log(`[Meeting] Received answer from: ${data.callerId}`)
+      
+      // Use the new safe signaling method instead of directly accessing the peer
+      const success = safelySignalPeer(data.callerId, data.answer)
+      
+      if (!success) {
+        console.log(`[Meeting] Could not apply answer to peer ${data.callerId} - peer may be destroyed or not found`)
+      }
     }
-  }
 
-  // Handle WebRTC signaling - ICE candidate
-  const handleCandidate = (data: { callerId: string; candidate: RTCIceCandidate }) => {
-    console.log(`[Meeting] Received ICE candidate from: ${data.callerId}`)
-    
-    // Use the new safe signaling method
-    const success = safelySignalPeer(data.callerId, { 
-      type: "candidate", 
-      candidate: data.candidate 
-    })
-    
-    if (!success) {
-      console.log(`[Meeting] Could not apply ICE candidate to peer ${data.callerId} - peer may be destroyed or not found`)
+    // Handle WebRTC signaling - ICE candidate
+    const handleCandidate = (data: { callerId: string; candidate: RTCIceCandidate }) => {
+      console.log(`[Meeting] Received ICE candidate from: ${data.callerId}`)
+      
+      // Use the new safe signaling method
+      const success = safelySignalPeer(data.callerId, { 
+        type: "candidate", 
+        candidate: data.candidate 
+      })
+      
+      if (!success) {
+        console.log(`[Meeting] Could not apply ICE candidate to peer ${data.callerId} - peer may be destroyed or not found`)
+      }
     }
-  }
 
-  // Handle chat messages
-  const handleMessage = (message: Message) => {
-    console.log(`[Meeting] Received message from ${message.senderId}: ${message.content}`)
-    setMessages((prev) => [...prev, message])
-  }
+    // Handle chat messages
+    const handleMessage = (message: Message) => {
+      // Skip messages that were sent by the current user to avoid duplicates
+      if (message.senderId === userId || message.isFromCurrentUser) {
+        console.log(`[Meeting] Skipping own message from: ${message.senderId}`);
+        return;
+      }
+      
+      console.log(`[Meeting] Received message from ${message.senderId}: ${message.content}`)
+      setMessages((prev) => [...prev, message])
+    }
 
-  // Handle hand raise
-  const handleRaiseHand = (data: { userId: string; isRaised: boolean }) => {
-    console.log(`[Meeting] User ${data.userId} ${data.isRaised ? "raised" : "lowered"} hand`)
-    setParticipants((prev) => prev.map((p) => (p.id === data.userId ? { ...p, hasHandRaised: data.isRaised } : p)))
-  }
+    // Handle hand raise
+    const handleRaiseHand = (data: { userId: string; isRaised: boolean }) => {
+      console.log(`[Meeting] User ${data.userId} ${data.isRaised ? "raised" : "lowered"} hand`)
+      setParticipants((prev) => prev.map((p) => (p.id === data.userId ? { ...p, hasHandRaised: data.isRaised } : p)))
+    }
 
-  // Register event handlers
-  socket.on("user-connected", handleUserConnected)
-  socket.on("existing-participants", handleExistingParticipants)
-  socket.on("user-disconnected", handleUserDisconnected)
-  socket.on("offer", handleOffer)
-  socket.on("answer", handleAnswer)
-  socket.on("candidate", handleCandidate)
-  socket.on("createMessage", handleMessage)
-  socket.on("raise-hand", handleRaiseHand)
+    // Register event handlers
+    socket.on("user-connected", handleUserConnected)
+    socket.on("existing-participants", handleExistingParticipants)
+    socket.on("user-disconnected", handleUserDisconnected)
+    socket.on("offer", handleOffer)
+    socket.on("answer", handleAnswer)
+    socket.on("candidate", handleCandidate)
+    socket.on("createMessage", handleMessage)
+    socket.on("raise-hand", handleRaiseHand)
 
-  return () => {
-    // Unregister event handlers
-    console.log("[Meeting] Removing socket event handlers")
-    socket.off("user-connected", handleUserConnected)
-    socket.off("existing-participants", handleExistingParticipants)
-    socket.off("user-disconnected", handleUserDisconnected)
-    socket.off("offer", handleOffer)
-    socket.off("answer", handleAnswer)
-    socket.off("candidate", handleCandidate)
-    socket.off("createMessage", handleMessage)
-    socket.off("raise-hand", handleRaiseHand)
-  }
-}, [
-  socket,
-  userId,
-  isJoined,
-  meetingId,
-  isLoadingIceServers,
-  isAudioOnlyMode,
-  createPeer,
-  addPeer,
-  safelySignalPeer, // Add the new function to dependencies
-  peersRef,
-  setPeers,
-  toggleAudioOnlyMode,
-  audioStreamRef,
-  streamRef,
-])
+    return () => {
+      // Unregister event handlers
+      console.log("[Meeting] Removing socket event handlers")
+      socket.off("user-connected", handleUserConnected)
+      socket.off("existing-participants", handleExistingParticipants)
+      socket.off("user-disconnected", handleUserDisconnected)
+      socket.off("offer", handleOffer)
+      socket.off("answer", handleAnswer)
+      socket.off("candidate", handleCandidate)
+      socket.off("createMessage", handleMessage)
+      socket.off("raise-hand", handleRaiseHand)
+    }
+  }, [
+    socket,
+    userId,
+    isJoined,
+    meetingId,
+    isLoadingIceServers,
+    isAudioOnlyMode,
+    createPeer,
+    addPeer,
+    safelySignalPeer, // Added the new function to dependencies
+    peersRef,
+    setPeers,
+    toggleAudioOnlyMode,
+    audioStreamRef,
+    streamRef,
+  ])
 
   // Configure WebRTC for low bandwidth
   const configureLowBandwidth = useCallback(() => {
@@ -853,7 +876,7 @@ useEffect(() => {
   // Send chat message
   const sendMessage = useCallback(
     (content: string) => {
-      if (!socket || !userId) return
+      if (!socket || !userId || !content.trim()) return
 
       console.log(`[Meeting] Sending message: ${content}`)
       const messageData = {
@@ -861,14 +884,19 @@ useEffect(() => {
         senderId: userId,
         content,
         timestamp: new Date().toISOString(),
+        isFromCurrentUser: true // Mark as from current user to prevent duplicates
       }
 
       socket.emit("message", messageData)
 
-      // Add to local messages
-      //setMessages((prev) => [...prev, messageData])
+      // Add to local messages with a flag to indicate it's from the current user
+      // This helps with styling in the UI
+      setMessages((prev) => [...prev, {
+        ...messageData,
+        isFromCurrentUser: true
+      }])
     },
-    [socket, userId, meetingId],
+    [socket, userId, meetingId]
   )
 
   // if not authenticated and theres is no name in the search params return join-meeting-modal
@@ -946,4 +974,3 @@ useEffect(() => {
     </div>
   )
 }
-

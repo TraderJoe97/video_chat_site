@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useState, useRef, useCallback } from "react"
 import Peer from "simple-peer"
 import type { Socket } from "socket.io-client"
 
@@ -30,7 +30,6 @@ export function usePeerConnections({
   streamRef,
   audioStreamRef,
 }: UsePeerConnectionsProps) {
-  // Initialize with default STUN servers to ensure we have something before the fetch completes
   const [iceServers, setIceServers] = useState<RTCIceServer[]>([
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
@@ -42,11 +41,6 @@ export function usePeerConnections({
   // Add a map to track peer IDs to their latest instance timestamp
   // This helps us identify outdated peer instances
   const peerTimestamps = useRef<Map<string, number>>(new Map())
-
-  // Log when ICE servers change
-  useEffect(() => {
-    console.log("[PeerConnections] ICE servers updated:", iceServers)
-  }, [iceServers])
 
   // Create a peer connection (initiator)
   const createPeer = useCallback(
@@ -60,19 +54,15 @@ export function usePeerConnections({
 
       const peer = new Peer({
         initiator: true,
-        trickle: true, // Enable trickle ICE for better connectivity
+        trickle: true,
         config: {
           iceServers: iceServers,
           iceCandidatePoolSize: 10,
         },
-        // Increase connection timeout
         sdpTransform: (sdp) => {
-          // Modify SDP to prioritize UDP and reduce video bitrate for more stable connections
           let modifiedSdp = sdp
             .replace(/a=ice-options:trickle\s\n/g, "")
-            // Prioritize UDP candidates
             .replace(/a=candidate.*tcp.*\r\n/g, "")
-            // Add b=AS to limit bandwidth for more stable connections
             .replace(
               /c=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0/g,
               "c=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\nb=AS:256",
@@ -94,7 +84,7 @@ export function usePeerConnections({
         },
       })
 
-      // Add stream after creation to ensure proper setup
+      // Add stream after creation
       console.log(`[PeerConnections] Adding stream to peer for ${userToSignal}`)
       peer.addStream(stream)
 
@@ -116,7 +106,6 @@ export function usePeerConnections({
         console.error(`[PeerConnections] Peer error with ${userToSignal}:`, err.message)
       })
 
-      // Add connection state change handler
       peer.on("iceStateChange", (state) => {
         console.log(`[PeerConnections] ICE state changed for ${userToSignal}:`, state)
       })
@@ -140,7 +129,6 @@ export function usePeerConnections({
   const addPeer = useCallback(
     (callerId: string, userId: string, incomingSignal: Peer.SignalData, stream: MediaStream) => {
       console.log(`[PeerConnections] Adding peer for ${callerId} (receiver)`)
-      console.log(`[PeerConnections] Using ${iceServers.length} ICE servers`)
 
       // Create timestamp for this peer instance
       const timestamp = Date.now()
@@ -148,19 +136,15 @@ export function usePeerConnections({
 
       const peer = new Peer({
         initiator: false,
-        trickle: true, // Enable trickle ICE for better connectivity
+        trickle: true,
         config: {
           iceServers: iceServers,
           iceCandidatePoolSize: 10,
         },
-        // Increase connection timeout
         sdpTransform: (sdp) => {
-          // Modify SDP to prioritize UDP and reduce video bitrate for more stable connections
           let modifiedSdp = sdp
             .replace(/a=ice-options:trickle\s\n/g, "")
-            // Prioritize UDP candidates
             .replace(/a=candidate.*tcp.*\r\n/g, "")
-            // Add b=AS to limit bandwidth for more stable connections
             .replace(
               /c=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0/g,
               "c=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\nb=AS:256",
@@ -182,7 +166,7 @@ export function usePeerConnections({
         },
       })
 
-      // Add stream after creation to ensure proper setup
+      // Add stream after creation
       console.log(`[PeerConnections] Adding stream to peer for ${callerId}`)
       peer.addStream(stream)
 
@@ -204,7 +188,6 @@ export function usePeerConnections({
         console.error(`[PeerConnections] Peer error with ${callerId}:`, err.message)
       })
 
-      // Add connection state change handler
       peer.on("iceStateChange", (state) => {
         console.log(`[PeerConnections] ICE state changed for ${callerId}:`, state)
       })
@@ -322,9 +305,10 @@ export function usePeerConnections({
     createPeer,
     addPeer,
     handlePeerReconnect,
-    safelySignalPeer,
+    safelySignalPeer, // Export the new safe signaling function
     setPeers,
     iceServers,
     setIceServers,
   }
 }
+
