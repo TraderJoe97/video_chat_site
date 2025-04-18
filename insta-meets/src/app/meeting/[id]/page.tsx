@@ -362,6 +362,7 @@ export default function MeetingPage() {
 
   // Socket event handlers
   useEffect(() => {
+    console.log("SOCKET EVENT HANDLERS USE EFFECT RERENDER");
     if (!socket || !userId || !isJoined || isLoadingIceServers) return
 
     console.log("[Meeting] Setting up socket event handlers")
@@ -601,7 +602,7 @@ export default function MeetingPage() {
     createPeer,
     addPeer,
     safelySignalPeer, // Added the new function to dependencies
-    //peersRef,
+    peersRef,
     setPeers,
     toggleAudioOnlyMode,
     audioStreamRef,
