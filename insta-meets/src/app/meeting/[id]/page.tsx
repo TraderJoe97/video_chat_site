@@ -387,7 +387,7 @@ export default function MeetingPage() {
 
         peersRef.current.push({
           peerId: data.userId,
-          peer,
+          peer: peer!,
           username: data.username,
           createdAt: timestamp,
           isDestroyed: false
@@ -397,7 +397,7 @@ export default function MeetingPage() {
           ...prev,
           {
             peerId: data.userId,
-            peer,
+            peer: peer!,
             username: data.username,
             createdAt: timestamp,
             isDestroyed: false
@@ -445,7 +445,7 @@ export default function MeetingPage() {
 
         peersRef.current.push({
           peerId: participant.userId,
-          peer,
+          peer: peer!,
           username: participant.username,
           createdAt: timestamp,
           isDestroyed: false
@@ -455,7 +455,7 @@ export default function MeetingPage() {
           ...prev,
           {
             peerId: participant.userId,
-            peer,
+            peer: peer!,
             username: participant.username,
             createdAt: timestamp,
             isDestroyed: false
@@ -506,7 +506,7 @@ export default function MeetingPage() {
         console.log(`[Meeting] Adding new peer connection for ${data.callerId}`)
         peersRef.current.push({
           peerId: data.callerId,
-          peer,
+          peer: peer!,
           username,
           createdAt: timestamp,
           isDestroyed: false
@@ -516,7 +516,7 @@ export default function MeetingPage() {
           ...prev,
           {
             peerId: data.callerId,
-            peer,
+            peer: peer!,
             username,
             createdAt: timestamp,
             isDestroyed: false
