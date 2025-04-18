@@ -592,20 +592,20 @@ export default function MeetingPage() {
       socket.off("raise-hand", handleRaiseHand)
     }
   }, [
-    socket,
-    userId,
-    isJoined,
-    meetingId,
-    isLoadingIceServers,
-    isAudioOnlyMode,
-    createPeer,
-    addPeer,
-    safelySignalPeer, // Added the new function to dependencies
-    peersRef,
-    setPeers,
-    toggleAudioOnlyMode,
-    audioStreamRef,
-    streamRef,
+    // socket,
+    // userId,
+    // isJoined,
+    // meetingId,
+    // isLoadingIceServers,
+    // isAudioOnlyMode,
+    // createPeer,
+    // addPeer,
+    // safelySignalPeer, // Added the new function to dependencies
+    // peersRef,
+    // setPeers,
+    // toggleAudioOnlyMode,
+    // audioStreamRef,
+    // streamRef,
   ])
 
   // Configure WebRTC for low bandwidth
