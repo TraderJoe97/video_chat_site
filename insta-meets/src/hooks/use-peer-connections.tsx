@@ -156,6 +156,7 @@ export function usePeerConnections({
       console.log(`[PeerConnections] Using ${iceServers.length} ICE servers`)
 
       // Create timestamp for this peer instance
+      console.log(`[PeerConnections] Timestamp for ${userToSignal} peer creation:`, timestamp)
       const timestamp = Date.now()
       peerTimestamps.current.set(userToSignal, timestamp)
 
@@ -176,6 +177,13 @@ export function usePeerConnections({
         // Add stream after creation to ensure proper setup
         console.log(`[PeerConnections] Adding stream to peer for ${userToSignal}`)
         peer.addStream(stream)
+
+        // Log when a new peer connection is created
+        peer.on("icecandidate", (candidate) => {
+          console.log(`[PeerConnections] ICE candidate generated for ${userToSignal}:`, candidate)
+        })
+
+        peer.on("icegatheringstatechange", (state) => console.log(`[PeerConnections] ICE gathering state changed for ${userToSignal}:`, peer.iceGatheringState))
 
         // Set a timeout to detect stalled connections
         const connectionTimeout = setTimeout(() => {
@@ -259,6 +267,7 @@ export function usePeerConnections({
         // Add connection state change handler
         peer.on("iceStateChange", (state) => {
           console.log(`[PeerConnections] ICE state changed for ${userToSignal}:`, state)
+          console.log(`[PeerConnections] ICE gathering state changed for ${userToSignal}:`, peer.iceGatheringState)
 
           // If we reach failed state, try to reconnect
           if (state === "failed") {
@@ -301,6 +310,16 @@ export function usePeerConnections({
           try {
             const message = JSON.parse(data.toString())
             console.log(`[PeerConnections] Received data from ${userToSignal}:`, message)
+             if(message.type === "connection-established"){
+              console.log(`[PeerConnections] Connection established with ${userToSignal} from data`);
+            }
+          } catch (err) {
+            console.error(`[PeerConnections] Error parsing data from ${userToSignal}:`, err)
+          }
+        })
+        peer.on("datachannel", (channel) => {
+          try {
+            console.log(`[PeerConnections] Data channel opened with ${userToSignal}`, channel)
           } catch (err) {
             console.error(`[PeerConnections] Error parsing data from ${userToSignal}:`, err)
           }
@@ -365,6 +384,7 @@ export function usePeerConnections({
       console.log(`[PeerConnections] Using ${iceServers.length} ICE servers`)
 
       // Create timestamp for this peer instance
+      console.log(`[PeerConnections] Timestamp for ${callerId} peer creation:`, timestamp)
       const timestamp = Date.now()
       peerTimestamps.current.set(callerId, timestamp)
 
@@ -385,6 +405,13 @@ export function usePeerConnections({
         // Add stream after creation to ensure proper setup
         console.log(`[PeerConnections] Adding stream to peer for ${callerId}`)
         peer.addStream(stream)
+
+        // Log when a new peer connection is created
+        peer.on("icecandidate", (candidate) => {
+          console.log(`[PeerConnections] ICE candidate generated for ${callerId}:`, candidate)
+        })
+
+        peer.on("icegatheringstatechange", (state) => console.log(`[PeerConnections] ICE gathering state changed for ${callerId}:`, peer.iceGatheringState))
 
         // Set a timeout to detect stalled connections
         const connectionTimeout = setTimeout(() => {
@@ -448,6 +475,7 @@ export function usePeerConnections({
         // Add connection state change handler
         peer.on("iceStateChange", (state) => {
           console.log(`[PeerConnections] ICE state changed for ${callerId}:`, state)
+          console.log(`[PeerConnections] ICE gathering state changed for ${callerId}:`, peer.iceGatheringState)
 
           // If we reach failed state, try to reconnect
           if (state === "failed") {
@@ -476,6 +504,16 @@ export function usePeerConnections({
           try {
             const message = JSON.parse(data.toString())
             console.log(`[PeerConnections] Received data from ${callerId}:`, message)
+            if(message.type === "connection-established"){
+              console.log(`[PeerConnections] Connection established with ${callerId} from data`);
+            }
+          } catch (err) {
+            console.error(`[PeerConnections] Error parsing data from ${callerId}:`, err)
+          }
+        })
+        peer.on("datachannel", (channel) => {
+          try {
+            console.log(`[PeerConnections] Data channel opened with ${callerId}`, channel)
           } catch (err) {
             console.error(`[PeerConnections] Error parsing data from ${callerId}:`, err)
           }
@@ -601,6 +639,7 @@ export function usePeerConnections({
       try {
         console.log(`[PeerConnections] Safely applying signal to peer ${peerId}`)
 
+        console.log(`[PeerConnections] Signal state: ${signal.type}`)
         // Check if this is an answer and the peer is in the right state
         if (signal.type === "answer") {
           const pc = (peerObj.peer as unknown as { _pc: RTCPeerConnection })._pc
@@ -629,7 +668,7 @@ export function usePeerConnections({
     if (!socket || !userId || socketHandlersRegistered.current) return
 
     console.log("[PeerConnections] Setting up socket event handlers")
-    socketHandlersRegistered.current = true
+      socketHandlersRegistered.current = true
 
     // Handle WebRTC signaling - offer
     const handleOffer = (data: { callerId: string; offer: Peer.SignalData }) => {

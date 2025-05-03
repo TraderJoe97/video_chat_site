@@ -56,6 +56,7 @@ export function useSocketConnection({
   const socketRef = useRef<Socket | null>(null)
   const socketInitializedRef = useRef<boolean>(false)
 
+  console.log("useSocketConnection - Rendering component", { userId, meetingId, username });
   useEffect(() => {
     const setupSocket = () => {
       if (socketInitializedRef.current || !userId) return
@@ -69,6 +70,7 @@ export function useSocketConnection({
       })
 
       socketRef.current = socketConnection
+      console.log("useSocketConnection - Socket created", socketConnection.id)
       setSocket(socketConnection)
       socketInitializedRef.current = true
 
@@ -76,6 +78,7 @@ export function useSocketConnection({
       socketConnection.on("connect", () => {
         console.log("Connected to socket server with ID:", socketConnection.id)
         socketConnection.emit("join-room", {
+          userId,
           meetingId,
           userId,
           username,
@@ -102,6 +105,7 @@ export function useSocketConnection({
         }))
 
         // Create a new peer connection only if one does not exist.
+        console.log(`useSocketConnection - Creating peer connection with ${userId}`)
         if (!peersRef.current[userId] && localStream) {
           const peer = createPeer(userId, socketConnection.id ?? "", localStream)
           peersRef.current[userId] = peer
@@ -125,11 +129,13 @@ export function useSocketConnection({
       })
 
       socketConnection.on("createMessage", (message: Message) => {
+        console.log(`useSocketConnection - Message received: ${message.text} from ${message.sender}`);
         // Only add the message if it's not from the current user or doesn't have the isFromMe flag
         if (message.sender !== userId || !message.isFromMe) {
           setMessages((prev) => [...prev, message])
         }
       })
+      console.log(`useSocketConnection - Setting socket events`);
 
       // Handle offer event: when another user initiates a call.
       socketConnection.on("offer", (data: { offer: SignalData; callerId: string; userId: string }) => {
@@ -142,6 +148,7 @@ export function useSocketConnection({
           monitorPeerConnection(peer, data.callerId)
         }
       })
+      console.log("useSocketConnection - Socket events set successfully");
 
       // Handle answer with stable state checking
       socketConnection.on("answer", (data: { answer: SignalData; callerId: string }) => {
@@ -196,6 +203,7 @@ export function useSocketConnection({
         }))
       })
     }
+    console.log("useSocketConnection - Calling setupSocket");
 
     // Only run once
     setupSocket()
@@ -203,6 +211,7 @@ export function useSocketConnection({
     // Cleanup on unmount
     return () => {
       if (socketRef.current) {
+        console.log("useSocketConnection - Disconnecting socket");
         socketRef.current.disconnect()
         socketInitializedRef.current = false
       }
@@ -211,6 +220,7 @@ export function useSocketConnection({
 
   const sendMessage = (text: string) => {
     if (socket && text.trim()) {
+      console.log(`useSocketConnection - Sending message: ${text}`);
       const messageData = {
         text,
         sender: userId,
@@ -218,6 +228,7 @@ export function useSocketConnection({
         meetingId,
         isFromMe: true, // Add this flag to identify locally sent messages
       }
+      console.log(`useSocketConnection - Emitting message event`);
       socket.emit("message", messageData)
       setMessages((prev) => [...prev, messageData])
     }
