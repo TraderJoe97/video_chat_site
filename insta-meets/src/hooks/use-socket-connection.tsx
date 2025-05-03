@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useRef, useEffect } from "react"
 import { io, type Socket } from "socket.io-client"
 import { toast } from "sonner"
@@ -56,7 +55,7 @@ export function useSocketConnection({
   const socketRef = useRef<Socket | null>(null)
   const socketInitializedRef = useRef<boolean>(false)
 
-  console.log("useSocketConnection - Rendering component", { userId, meetingId, username });
+  console.log("useSocketConnection - Rendering component", { userId, meetingId, username })
   useEffect(() => {
     const setupSocket = () => {
       if (socketInitializedRef.current || !userId) return
@@ -76,7 +75,7 @@ export function useSocketConnection({
 
       // Register socket events once:
       socketConnection.on("connect", () => {
-        console.log("Connected to socket server with ID:", socketConnection.id)
+        console.log("useSocketConnection - Connected to socket server with ID:", socketConnection.id)
         socketConnection.emit("join-room", {
           userId,
           meetingId,
@@ -86,13 +85,13 @@ export function useSocketConnection({
       })
 
       socketConnection.on("connect_error", (error) => {
-        console.error("Socket connection error:", error)
+        console.error("useSocketConnection - Socket connection error:", error)
         toast.error("Failed to connect to the meeting server")
       })
 
       // Prevent duplicate participants by checking if the user is already in the list
       socketConnection.on("user-connected", ({ userId, username }) => {
-        console.log("User connected:", userId, username)
+        console.log("useSocketConnection - User connected:", userId, username)
         setParticipants((prev) => {
           if (prev.some((p) => p.id === userId)) return prev
           return [...prev, { id: userId, name: username || userId }]
@@ -115,7 +114,7 @@ export function useSocketConnection({
       })
 
       socketConnection.on("user-disconnected", (userId) => {
-        console.log("User disconnected:", userId)
+        console.log("useSocketConnection - User disconnected:", userId)
         setParticipants((prev) => prev.filter((p) => p.id !== userId))
         if (peersRef.current[userId]) {
           peersRef.current[userId].destroy()
@@ -129,51 +128,61 @@ export function useSocketConnection({
       })
 
       socketConnection.on("createMessage", (message: Message) => {
-        console.log(`useSocketConnection - Message received: ${message.text} from ${message.sender}`);
+        console.log(`useSocketConnection - Message received: ${message.text} from ${message.sender}`)
         // Only add the message if it's not from the current user or doesn't have the isFromMe flag
         if (message.sender !== userId || !message.isFromMe) {
           setMessages((prev) => [...prev, message])
         }
       })
-      console.log(`useSocketConnection - Setting socket events`);
+      console.log(`useSocketConnection - Setting socket events`)
 
       // Handle offer event: when another user initiates a call.
-      socketConnection.on("offer", (data: { offer: SignalData; callerId: string; userId: string }) => {
-        console.log(`Received offer from ${data.callerId}`)
+      socketConnection.on("offer", (data: { offer: SignalData; callerId: string; userId: string}) => {
+        console.log(`useSocketConnection - Received offer from ${data.callerId}`)
         // Only process if the offer is for this user
         if (data.userId === userId && localStream) {
-          const peer = addPeer(data.offer, data.callerId, localStream)
+          const peer = addPeer(data.offer, data.callerId, localStream) 
           peersRef.current[data.callerId] = peer
           setPeers((prev) => ({ ...prev, [data.callerId]: peer }))
           monitorPeerConnection(peer, data.callerId)
         }
       })
-      console.log("useSocketConnection - Socket events set successfully");
+      console.log("useSocketConnection - Socket events set successfully")
 
       // Handle answer with stable state checking
       socketConnection.on("answer", (data: { answer: SignalData; callerId: string }) => {
+        console.log(`useSocketConnection - Received answer from ${data.callerId}`);
         const peer = peersRef.current[data.callerId] as Peer.Instance
         if (peer) {
-          const pc = (peer as unknown as { _pc: RTCPeerConnection })._pc
+          const pc = peer as unknown as { _pc: RTCPeerConnection }
           // Only signal the answer if the underlying RTCPeerConnection is in "have-local-offer" state.
-          if (pc && pc.signalingState === "have-local-offer") {
-            console.log(`Setting remote answer for ${data.callerId}`)
+          if (pc._pc && pc._pc.signalingState === "have-local-offer") {
+            console.log(`useSocketConnection - Setting remote answer for ${data.callerId}`)
             peer.signal(data.answer)
           } else {
-            console.warn(`Answer from ${data.callerId} ignored (signalingState: ${pc ? pc.signalingState : "unknown"})`)
+            console.warn(
+              `useSocketConnection - Answer from ${data.callerId} ignored (signalingState: ${
+                pc ? pc.signalingState : "unknown"
+              })`,
+            )
           }
+        } else {
+          console.warn(`useSocketConnection - Received answer for unknown peer ${data.callerId}`);
         }
       })
 
       // Handle ICE candidates
-      socketConnection.on("candidate", (data: { candidate: SignalData; callerId: string }) => {
+      socketConnection.on("candidate", (data: { candidate: RTCIceCandidate; callerId: string }) => {
+        console.log(`useSocketConnection - Received ICE candidate from: ${data.callerId}`);
         if (peersRef.current[data.callerId]) {
           peersRef.current[data.callerId].signal(data.candidate)
+        } else {
+          console.warn(`useSocketConnection - Received candidate for unknown peer ${data.callerId}`);
         }
       })
 
       socketConnection.on("existing-participants", (participants: Array<{ userId: string; username: string }>) => {
-        console.log("Existing participants:", participants)
+        console.log("useSocketConnection - Existing participants:", participants)
 
         // Update participants state
         setParticipants((prev) => {
@@ -203,7 +212,7 @@ export function useSocketConnection({
         }))
       })
     }
-    console.log("useSocketConnection - Calling setupSocket");
+    console.log("useSocketConnection - Calling setupSocket")
 
     // Only run once
     setupSocket()
@@ -211,7 +220,7 @@ export function useSocketConnection({
     // Cleanup on unmount
     return () => {
       if (socketRef.current) {
-        console.log("useSocketConnection - Disconnecting socket");
+        console.log("useSocketConnection - Disconnecting socket")
         socketRef.current.disconnect()
         socketInitializedRef.current = false
       }
@@ -220,7 +229,7 @@ export function useSocketConnection({
 
   const sendMessage = (text: string) => {
     if (socket && text.trim()) {
-      console.log(`useSocketConnection - Sending message: ${text}`);
+      console.log(`useSocketConnection - Sending message: ${text}`)
       const messageData = {
         text,
         sender: userId,
@@ -228,8 +237,9 @@ export function useSocketConnection({
         meetingId,
         isFromMe: true, // Add this flag to identify locally sent messages
       }
-      console.log(`useSocketConnection - Emitting message event`);
+      console.log(`useSocketConnection - Emitting message event`)
       socket.emit("message", messageData)
+      console.log(`useSocketConnection - Message emitted: ${text}`)
       setMessages((prev) => [...prev, messageData])
     }
   }
