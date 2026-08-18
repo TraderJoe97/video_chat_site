@@ -124,6 +124,10 @@ io.on("connect", (socket) => {
     socket.userId = userId
     socket.meetingId = meetingId
 
+    // Join both the meeting room and personal user room for direct signaling
+    socket.join(meetingId)
+    socket.join(userId)
+
     // Store meeting in database if MongoDB is configured
     if (MONGO_URI) {
       try {
@@ -141,9 +145,6 @@ io.on("connect", (socket) => {
         console.error("Error in join-room meeting check:", error)
       }
     }
-
-    // Join the Socket.io room
-    socket.join(meetingId)
 
     // Notify other participants about the new user
     socket.to(meetingId).emit("user-connected", {
@@ -168,48 +169,41 @@ io.on("connect", (socket) => {
     io.to(meetingId).emit("createMessage", messageData)
   })
 
-  // WebRTC Signaling - Offer
+  // WebRTC Signaling - Offer (Unicast directly to intended user)
   socket.on("offer", (data) => {
-    console.log(`Offer from ${data.callerId} for ${data.userId} in meeting ${data.meetingId}`)
+    const targetUserId = data.targetUserId || data.userId
+    console.log(`Offer from ${data.callerId} for ${targetUserId} in meeting ${data.meetingId}`)
     
-    // Fixed: Use room broadcast for better reliability
-    socket.to(data.meetingId).emit("offer", {
-      callerId: data.callerId,
-      offer: data.offer,
-    })
+    if (targetUserId) {
+      io.to(targetUserId).emit("offer", {
+        callerId: data.callerId,
+        offer: data.offer,
+        callerUsername: data.callerUsername,
+      })
+    }
   })
 
-  // WebRTC Signaling - Answer
+  // WebRTC Signaling - Answer (Unicast directly to intended user)
   socket.on("answer", (data) => {
-    console.log(`Answer from ${socket.id} to ${data.callerId} in meeting ${data.meetingId}`)
+    const targetUserId = data.targetUserId || data.callerId
+    console.log(`Answer from ${data.userId || socket.userId} to ${targetUserId} in meeting ${data.meetingId}`)
     
-    // Fixed: Use direct socket ID if available, otherwise use room
-    if (io.sockets.sockets.has(data.callerId)) {
-      socket.to(data.callerId).emit("answer", {
-        callerId: socket.userId || socket.id,
-        answer: data.answer,
-      })
-    } else {
-      socket.to(data.meetingId).emit("answer", {
-        callerId: socket.userId || socket.id,
+    if (targetUserId) {
+      io.to(targetUserId).emit("answer", {
+        callerId: data.userId || socket.userId,
         answer: data.answer,
       })
     }
   })
 
-  // WebRTC Signaling - ICE Candidate
+  // WebRTC Signaling - ICE Candidate (Unicast directly to intended user)
   socket.on("candidate", (data) => {
-    console.log(`Candidate from ${socket.id} to ${data.callerId} in meeting ${data.meetingId}`)
+    const targetUserId = data.targetUserId || data.userId || data.callerId
+    console.log(`Candidate from ${data.callerId || socket.userId} to ${targetUserId} in meeting ${data.meetingId}`)
     
-    // Fixed: Use direct socket ID if available, otherwise use room
-    if (io.sockets.sockets.has(data.callerId)) {
-      socket.to(data.callerId).emit("candidate", {
-        callerId: socket.userId || socket.id,
-        candidate: data.candidate,
-      })
-    } else {
-      socket.to(data.meetingId).emit("candidate", {
-        callerId: socket.userId || socket.id,
+    if (targetUserId) {
+      io.to(targetUserId).emit("candidate", {
+        callerId: data.callerId || socket.userId,
         candidate: data.candidate,
       })
     }

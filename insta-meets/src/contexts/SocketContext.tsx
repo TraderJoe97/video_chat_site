@@ -25,9 +25,11 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
-    // Use environment variable or localStorage fallback
+    // Use environment variable or localhost fallback
     const backendUrl =
-      process.env.BACKEND_URL 
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      process.env.BACKEND_URL ||
+      "http://localhost:4000"
     console.log("Connecting to socket server at:", backendUrl)
 
     const newSocket = io(backendUrl, {
