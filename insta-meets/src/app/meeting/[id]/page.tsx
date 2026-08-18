@@ -740,13 +740,8 @@ export default function MeetingPage() {
     [socket, userId, meetingId]
   )
 
-  // if not authenticated and theres is no name in the search params return join-meeting-modal
-  if (!isAuthenticated && !guestName) {
-    return <JoinMeetingModal meetingId={meetingId} isOpen={true} onClose={() => {}} />
-  }
-
-  // Show loading state while fetching ICE servers
-  if (isLoadingIceServers) {
+  // Show loading state while determining auth or fetching ICE servers
+  if (isLoading || isLoadingIceServers) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
@@ -756,6 +751,11 @@ export default function MeetingPage() {
         </div>
       </div>
     )
+  }
+
+  // If not authenticated and there is no guest name in search params, show join modal
+  if (!isAuthenticated && !guestName) {
+    return <JoinMeetingModal meetingId={meetingId} isOpen={true} onClose={() => {}} />
   }
 
   return (

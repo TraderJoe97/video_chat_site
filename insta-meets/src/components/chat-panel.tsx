@@ -43,6 +43,17 @@ export default function ChatPanel({ messages, participants, onSendMessage }: Cha
     return participant ? participant.name : "Unknown"
   }
 
+  // Safe relative time formatting helper
+  const formatTime = (timestamp: string) => {
+    try {
+      const date = new Date(timestamp)
+      if (isNaN(date.getTime())) return "just now"
+      return formatDistanceToNow(date, { addSuffix: true })
+    } catch {
+      return "just now"
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -54,7 +65,7 @@ export default function ChatPanel({ messages, participants, onSendMessage }: Cha
               <div className="flex items-center gap-2">
                 <span className="font-semibold">{getParticipantName(msg.senderId)}</span>
                 <span className="text-xs text-muted-foreground">
-                  {formatDistanceToNow(new Date(msg.timestamp), { addSuffix: true })}
+                  {formatTime(msg.timestamp)}
                 </span>
               </div>
               <p className="mt-1">{msg.content}</p>

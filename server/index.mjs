@@ -35,6 +35,9 @@ const meetingSchema = new mongoose.Schema(
 )
 const Meeting = mongoose.model("Meeting", meetingSchema)
 
+// In-Memory Meetings Store (Fallback when MongoDB is absent)
+const inMemoryMeetings = new Map()
+
 // Express App Setup
 const app = express()
 app.use(
@@ -48,7 +51,7 @@ app.use(express.json())
 // API Routes
 app.get("/test-meetings", async (req, res) => {
   if (!MONGO_URI) {
-    return res.status(503).json({ error: "Database not configured" })
+    return res.status(200).json(Array.from(inMemoryMeetings.values()))
   }
   
   try {
@@ -56,23 +59,32 @@ app.get("/test-meetings", async (req, res) => {
     res.json(meetings)
   } catch (error) {
     console.error("Error fetching meetings:", error)
-    res.status(500).json({ error: "Failed to fetch meetings" })
+    res.json(Array.from(inMemoryMeetings.values()))
   }
 })
 
 app.post("/create-meeting", async (req, res) => {
+  const { meetingId, hostId, meetingName } = req.body
+  const meetingData = {
+    meetingId,
+    hostId,
+    meetingName: meetingName || "Untitled Meeting",
+    createdAt: new Date(),
+  }
+
+  inMemoryMeetings.set(meetingId, meetingData)
+
   if (!MONGO_URI) {
-    return res.status(503).json({ error: "Database not configured" })
+    return res.status(201).json(meetingData)
   }
   
-  const { meetingId, hostId, meetingName } = req.body
   try {
-    const newMeeting = new Meeting({ meetingId, hostId, meetingName })
+    const newMeeting = new Meeting(meetingData)
     await newMeeting.save()
     res.status(201).json(newMeeting)
   } catch (error) {
-    console.error("Error creating meeting:", error)
-    res.status(500).json({ error: "Failed to create meeting" })
+    console.error("Error creating meeting in DB, using in-memory:", error)
+    res.status(201).json(meetingData)
   }
 })
 
@@ -81,7 +93,7 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ 
     status: "ok", 
     message: "Server is running",
-    database: MONGO_URI ? "connected" : "not configured"
+    database: MONGO_URI ? "connected" : "in-memory fallback"
   })
 })
 
@@ -164,7 +176,13 @@ io.on("connect", (socket) => {
 
   // Chat Messages
   socket.on("message", (messageData) => {
-    console.log("Received message:", messageData)
+    if (!messageData || typeof messageData.meetingId !== "string" || !messageData.meetingId.trim()) {
+      return
+    }
+    if (typeof messageData.content !== "string" || messageData.content.length > 2000) {
+      return
+    }
+    console.log("Received valid message:", messageData)
     const { meetingId } = messageData
     io.to(meetingId).emit("createMessage", messageData)
   })
@@ -248,7 +266,23 @@ io.on("connect", (socket) => {
 function handleUserLeaving(socket, meetingId, userId) {
   if (!meetingId || !userId) return
   
-  console.log(`User ${userId} leaving meeting ${meetingId}`)
+  socket.leave(meetingId)
+
+  // Check if this user still has another active socket in the meeting room
+  let hasOtherActiveSocket = false
+  for (const [sId, s] of io.sockets.sockets.entries()) {
+    if (s.id !== socket.id && s.userId === userId && s.meetingId === meetingId) {
+      hasOtherActiveSocket = true
+      break
+    }
+  }
+
+  if (hasOtherActiveSocket) {
+    console.log(`User ${userId} still has active socket in meeting ${meetingId}, keeping user registered`)
+    return
+  }
+
+  console.log(`User ${userId} fully leaving meeting ${meetingId}`)
   
   // Remove user from active users map
   if (activeUsers.has(meetingId)) {
@@ -258,9 +292,6 @@ function handleUserLeaving(socket, meetingId, userId) {
     
     // Notify other participants
     socket.to(meetingId).emit("user-disconnected", userId)
-    
-    // Leave the socket.io room
-    socket.leave(meetingId)
     
     console.log(`${username || userId} removed from meeting: ${meetingId}`)
     

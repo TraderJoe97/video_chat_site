@@ -3,9 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node dist/index.js",
-    "build": "tsc",
-    "dev": "ts-node index.ts"
+    "start": "node index.mjs",
+    "dev": "node --watch index.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

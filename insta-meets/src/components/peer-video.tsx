@@ -25,6 +25,7 @@ export const PeerVideo = ({
 }: PeerVideoProps) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const playTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [connectionState, setConnectionState] = useState<string>("new")
   const [hasStream, setHasStream] = useState(false)
   const [isReconnecting, setIsReconnecting] = useState(false)
@@ -79,19 +80,17 @@ export const PeerVideo = ({
           videoRef.current.playsInline = true
           videoRef.current.autoplay = true
 
-          // Add buffer by increasing latency
-          // A higher value (e.g., 1-2 seconds) provides more stability but increases delay
           videoRef.current.oncanplay = () => {
             if (videoRef.current) {
               try {
-                // Delay playback slightly to build buffer
-                setTimeout(() => {
+                if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current)
+                playTimeoutRef.current = setTimeout(() => {
                   videoRef.current?.play().catch((err) => {
-                    console.error(`[PeerVideo] Error playing video: ${err.message}`)
+                    console.warn(`[PeerVideo] Autoplay prevented for ${username}: ${err.message}`)
                   })
-                }, 500)
+                }, 300)
               } catch (err) {
-                console.error(`[PeerVideo] Error in buffered playback: ${err}`)
+                console.error(`[PeerVideo] Error in buffered playback:`, err)
               }
             }
           }
@@ -161,6 +160,7 @@ export const PeerVideo = ({
     // Clean up
     return () => {
       console.log(`[PeerVideo] Removing event listeners for peer: ${username}`)
+      if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current)
       peer.off("stream", handleStream)
       peer.off("error", handleError)
       peer.off("close", handleClose)
