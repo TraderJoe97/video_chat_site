@@ -77,7 +77,6 @@ export function useSocketConnection({
       socketConnection.on("connect", () => {
         console.log("useSocketConnection - Connected to socket server with ID:", socketConnection.id)
         socketConnection.emit("join-room", {
-          userId,
           meetingId,
           userId,
           username,
@@ -162,7 +161,7 @@ export function useSocketConnection({
           } else {
             console.warn(
               `useSocketConnection - Answer from ${data.callerId} ignored (signalingState: ${
-                pc ? pc.signalingState : "unknown"
+                pc && pc._pc ? pc._pc.signalingState : "unknown"
               })`,
             )
           }
@@ -175,7 +174,7 @@ export function useSocketConnection({
       socketConnection.on("candidate", (data: { candidate: RTCIceCandidate; callerId: string }) => {
         console.log(`useSocketConnection - Received ICE candidate from: ${data.callerId}`);
         if (peersRef.current[data.callerId]) {
-          peersRef.current[data.callerId].signal(data.candidate)
+          peersRef.current[data.callerId].signal({ type: "candidate", candidate: data.candidate })
         } else {
           console.warn(`useSocketConnection - Received candidate for unknown peer ${data.callerId}`);
         }

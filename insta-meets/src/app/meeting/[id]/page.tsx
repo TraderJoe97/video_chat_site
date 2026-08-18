@@ -341,12 +341,6 @@ export default function MeetingPage() {
         audioStreamRef.current.getTracks().forEach((track) => track.stop())
       }
 
-      // Disconnect peers
-      console.log(`[Meeting] Destroying ${peersRef.current.length} peer connections`)
-      peersRef.current.forEach(({ peer }) => {
-        peer.destroy()
-      })
-
       // Leave the room
       if (socket && userId) {
         console.log(`[Meeting] Leaving room ${meetingId}`)
@@ -356,7 +350,7 @@ export default function MeetingPage() {
         })
       }
     }
-  }, [isConnected, socket, userId, username, meetingId, isLoadingIceServers, peersRef])
+  }, [isConnected, socket, userId, username, meetingId, isLoadingIceServers])
 
   // Socket event handlers
   useEffect(() => {

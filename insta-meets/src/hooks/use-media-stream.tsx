@@ -13,12 +13,15 @@ export function useMediaStream() {
 
   const bandwidthRef = useRef<number>(1000) // Initial bandwidth estimate (kbps)
 
+  const streamRef = useRef<MediaStream | null>(null)
+
   const initializeStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       })
+      streamRef.current = stream
       setLocalStream(stream)
       setIsConnecting(false)
     } catch (error) {
@@ -32,11 +35,11 @@ export function useMediaStream() {
     initializeStream()
 
     return () => {
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop())
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop())
       }
     }
-  }, []) // Removed unnecessary dependencies
+  }, [])
 
   useEffect(() => {
     if (connectionQuality === "poor" && !audioOnlyMode) {
