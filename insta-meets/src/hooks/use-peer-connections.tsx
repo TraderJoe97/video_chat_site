@@ -40,7 +40,7 @@ export function usePeerConnections({
   const [peers, setPeers] = useState<PeerConnection[]>([])
   const peersRef = useRef<PeerConnection[]>([])
   const peerTimestamps = useRef<Map<string, number>>(new Map())
-  const pendingCandidates = useRef<Map<string, any[]>>(new Map())
+  const pendingCandidates = useRef<Map<string, (Peer.SignalData | RTCIceCandidateInit)[]>>(new Map())
   const isMounted = useRef(true)
 
   useEffect(() => {
@@ -301,14 +301,14 @@ export function usePeerConnections({
   )
 
   // Safely apply incoming signal (answer or candidate) to an existing peer
-  const safelySignalPeer = useCallback((peerId: string, signal: Peer.SignalData | any) => {
+  const safelySignalPeer = useCallback((peerId: string, signal: Peer.SignalData | RTCIceCandidateInit | { candidate: RTCIceCandidateInit }) => {
     if (!isMounted.current) return false
 
     const peerObj = peersRef.current.find((p) => p.peerId === peerId && !p.isDestroyed)
 
     if (peerObj && peerObj.peer) {
       try {
-        peerObj.peer.signal(signal)
+        peerObj.peer.signal(signal as Peer.SignalData)
         return true
       } catch (err) {
         console.error(`[PeerConnections] Error signaling peer ${peerId}:`, err)
@@ -316,13 +316,13 @@ export function usePeerConnections({
       }
     } else {
       // If peer is not yet created and signal is a candidate, buffer it
-      if (signal?.candidate || signal?.type === "candidate") {
+      if ("candidate" in signal || ("type" in signal && signal.type === "candidate")) {
         console.log(`[PeerConnections] Buffering ICE candidate for peer ${peerId} (not created yet)`)
         const existingQueue = pendingCandidates.current.get(peerId) || []
-        existingQueue.push(signal)
+        existingQueue.push(signal as Peer.SignalData)
         pendingCandidates.current.set(peerId, existingQueue)
       } else {
-        console.log(`[PeerConnections] Peer ${peerId} not found or destroyed; ignoring signal of type: ${signal?.type}`)
+        console.log(`[PeerConnections] Peer ${peerId} not found or destroyed; ignoring signal`)
       }
       return false
     }
@@ -374,10 +374,11 @@ export function usePeerConnections({
       safelySignalPeer(data.callerId, data.answer)
     }
 
-    const handleCandidate = (data: { callerId: string; candidate: any }) => {
-      const candidatePayload = data.candidate?.candidate
-        ? data.candidate
-        : { candidate: data.candidate }
+    const handleCandidate = (data: { callerId: string; candidate: RTCIceCandidateInit | { candidate: RTCIceCandidateInit } }) => {
+      const candidatePayload: Peer.SignalData =
+        typeof data.candidate === "object" && "candidate" in data.candidate && typeof data.candidate.candidate === "object"
+          ? (data.candidate as unknown as Peer.SignalData)
+          : ({ candidate: data.candidate as unknown as RTCIceCandidate } as Peer.SignalData)
       safelySignalPeer(data.callerId, candidatePayload)
     }
 

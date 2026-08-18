@@ -12,7 +12,6 @@ import { MeetingControls } from "@/components/meeting/meeting-controls"
 import { VideoGrid } from "@/components/meeting/video-grid"
 import { MeetingSidebar } from "@/components/meeting/meeting-sidebar"
 import { usePeerConnections } from "@/hooks/use-peer-connections"
-import type Peer from "simple-peer"
 
 export interface Message {
   senderId: string
@@ -71,13 +70,9 @@ export default function MeetingPage() {
     peers, 
     peersRef, 
     createPeer, 
-    addPeer, 
     cleanupPeers,
     handlePeerReconnect, 
-    safelySignalPeer,
-    setPeers, 
     setIceServers,
-    updatePeerUsernames,
   } = usePeerConnections({
     meetingId,
     userId,
