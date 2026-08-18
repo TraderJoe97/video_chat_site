@@ -356,7 +356,7 @@ export default function MeetingPage() {
         })
       }
     }
-  }, [isConnected, socket, userId, username, meetingId, isLoadingIceServers, peersRef, createPeer, addPeer])
+  }, [isConnected, socket, userId, username, meetingId, isLoadingIceServers, peersRef])
 
   // Socket event handlers
   useEffect(() => {
