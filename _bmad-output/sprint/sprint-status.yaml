@@ -2,61 +2,78 @@
 
 project: video_chat_site
 current_sprint: Sprint-1-Rebuild
-updated_at: 2026-08-19T10:42:00Z
+updated_at: 2026-08-19T10:56:00Z
 
 epics:
   - id: EPIC-1
     title: ".NET 10 Web API & SignalR Hub Backend"
-    status: in-progress
+    status: completed
     stories:
       - id: US-1.1
         title: "Scaffold ASP.NET Core 10 Web API Project in backend/"
-        status: ready
+        status: completed
       - id: US-1.2
-        title: "Implement MeetingController for CRUD and Health Checks"
-        status: ready
+        title: "Implement MeetingController for CRUD, chat history, and Health Checks"
+        status: completed
       - id: US-1.3
-        title: "Implement SignalingHub with SignalR for presence, chat, and room events"
-        status: ready
+        title: "Implement MeetingHub with SignalR for presence, chat, and room events"
+        status: completed
+      - id: US-1.4
+        title: "Integrate Supabase persistence client for meetings and chat history"
+        status: completed
 
   - id: EPIC-2
     title: "Mediasoup SFU Node.js Engine"
-    status: in-progress
+    status: completed
     stories:
       - id: US-2.1
         title: "Scaffold SFU service with Mediasoup v3 worker pool and room router management"
-        status: ready
+        status: completed
       - id: US-2.2
         title: "Implement WebRtcTransport creation for send and recv streams"
-        status: ready
+        status: completed
       - id: US-2.3
         title: "Implement audio/video producer and consumer fanout"
-        status: ready
+        status: completed
 
   - id: EPIC-3
     title: "Next.js Mediasoup Client Hook & State Machine"
-    status: in-progress
+    status: completed
     stories:
       - id: US-3.1
         title: "Install mediasoup-client and create useMediasoup hook"
-        status: ready
+        status: completed
       - id: US-3.2
         title: "Implement 1-up stream publish (camera/mic) and multi-downstream consumption"
-        status: ready
+        status: completed
       - id: US-3.3
         title: "Integrate SignalR client with meeting state"
-        status: ready
+        status: completed
+      - id: US-3.4
+        title: "Configure Next.js proxy rewrites for .NET REST, SignalR, and SFU"
+        status: completed
 
   - id: EPIC-4
     title: "Premium Modern UI/UX Redesign"
-    status: in-progress
+    status: completed
     stories:
       - id: US-4.1
         title: "Glassmorphic Theme & Responsive Layout with Floating Controls"
-        status: ready
+        status: completed
       - id: US-4.2
-        title: "Dynamic Speaker Spotlight Grid with Audio Visualizers & Badges"
-        status: ready
+        title: "Dynamic Video Grid with Audio Visualizers & Badges (MediasoupVideoTile)"
+        status: completed
       - id: US-4.3
         title: "Slide-out Animated Chat & Participant Drawers"
-        status: ready
+        status: completed
+
+  - id: EPIC-5
+    title: "Unified Production Deployment Container"
+    status: completed
+    stories:
+      - id: US-5.1
+        title: "Create unified multi-stage Dockerfile (.NET 10 + Mediasoup SFU + Supervisor)"
+        status: completed
+      - id: US-5.2
+        title: "Create docker-compose.yml with UDP port range mapping"
+        status: completed
