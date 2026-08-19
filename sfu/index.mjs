@@ -24,7 +24,7 @@ const DOTNET_URL = process.env.DOTNET_BACKEND_URL || "http://127.0.0.1:5001"
 const dotnetProxy = createProxyMiddleware({
   target: DOTNET_URL,
   changeOrigin: true,
-  ws: true,
+  ws: false, // Disables global auto-interception; WebSocket upgrade for /hubs is handled explicitly below
   on: {
     proxyReq: (proxyReq, req, res) => {
       // Forward client origin to backend
@@ -43,7 +43,7 @@ const dotnetProxy = createProxyMiddleware({
 
 // Route both /hubs and /api/meetings through the proxy
 app.use((req, res, next) => {
-  if (req.url.startsWith("/hubs") || req.url.startsWith("/api/meetings")) {
+  if (req.url && (req.url.startsWith("/hubs") || req.url.startsWith("/api/meetings"))) {
     return dotnetProxy(req, res, next)
   }
   next()
@@ -70,20 +70,25 @@ app.use(express.json())
 
 const httpServer = http.createServer(app)
 
-// Handle WebSocket upgrade for SignalR Hub
-httpServer.on("upgrade", (req, socket, head) => {
-  if (req.url && req.url.startsWith("/hubs")) {
-    dotnetProxy.upgrade(req, socket, head)
-  }
-})
-
+// Initialize Socket.io SFU Gateway
 const io = new Server(httpServer, {
+  path: "/socket.io/",
   cors: {
-    origin: true,
+    origin: (origin, callback) => callback(null, true),
     credentials: true,
     methods: ["GET", "POST"],
   },
   transports: ["websocket", "polling"],
+  allowEIO3: true,
+  pingTimeout: 30000,
+  pingInterval: 25000,
+})
+
+// Handle WebSocket upgrade for SignalR Hub (without interfering with Socket.io)
+httpServer.on("upgrade", (req, socket, head) => {
+  if (req.url && req.url.startsWith("/hubs")) {
+    dotnetProxy.upgrade(req, socket, head)
+  }
 })
 
 // Mediasoup State
