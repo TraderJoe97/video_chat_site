@@ -1,27 +1,40 @@
-# Unified Production Dockerfile: .NET 10 Backend + Mediasoup SFU
+# Unified Production Dockerfile: .NET 10 Backend + Mediasoup SFU (Debian glibc for prebuilt Mediasoup binary)
 
 # --- Stage 1: Build .NET Backend ---
-FROM mcr.microsoft.com/dotnet/sdk:10.0-preview-alpine AS dotnet-build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-preview-bookworm-slim AS dotnet-build
 WORKDIR /src/backend
 COPY backend/Backend.csproj .
 RUN dotnet restore
 COPY backend/ .
 RUN dotnet publish -c Release -o /app/backend
 
-# --- Stage 2: Build Mediasoup SFU (Node.js + C++ Worker compilation) ---
-FROM node:22-alpine AS sfu-build
+# --- Stage 2: Build Mediasoup SFU ---
+FROM node:22-bookworm-slim AS sfu-build
 WORKDIR /src/sfu
-RUN apk add --no-cache python3 make g++ linux-headers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 COPY sfu/package.json .
-RUN npm install --production
+RUN npm install --omit=dev
 COPY sfu/ .
 
 # --- Stage 3: Final Unified Runtime Image ---
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview-alpine AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview-bookworm-slim AS runtime
 WORKDIR /app
 
-# Install Node.js & Supervisord to run both services in one container
-RUN apk add --no-cache nodejs supervisor
+# Install Node.js 22 & Supervisor
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    supervisor \
+    ca-certificates \
+    gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy .NET published output
 COPY --from=dotnet-build /app/backend /app/backend
