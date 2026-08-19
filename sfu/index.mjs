@@ -4,7 +4,7 @@ import cors from "cors"
 import { Server } from "socket.io"
 import * as mediasoup from "mediasoup"
 import { createProxyMiddleware } from "http-proxy-middleware"
-import { config } from "./config.mjs"
+import { config, getWebRtcListenIps, resolveAnnouncedIp } from "./config.mjs"
 
 const app = express()
 
@@ -185,9 +185,10 @@ io.on("connection", (socket) => {
       if (!router) throw new Error("Router not found for meeting")
 
       const { webRtcTransport: transportOptions } = config.mediasoup
+      const listenIps = await getWebRtcListenIps()
 
       const transport = await router.createWebRtcTransport({
-        listenIps: transportOptions.listenIps,
+        listenIps,
         enableUdp: transportOptions.enableUdp,
         enableTcp: transportOptions.enableTcp,
         preferUdp: transportOptions.preferUdp,

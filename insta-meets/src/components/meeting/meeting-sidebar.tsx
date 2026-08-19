@@ -7,8 +7,10 @@ import { MessageSquare, Users } from "lucide-react"
 
 export interface SidebarMessage {
   senderId: string
+  senderName?: string
   content: string
   timestamp: string
+  isFromCurrentUser?: boolean
 }
 
 interface MeetingSidebarProps {
@@ -16,6 +18,8 @@ interface MeetingSidebarProps {
   setActiveTab: (tab: string) => void
   participants: Participant[]
   messages: SidebarMessage[]
+  currentUserId?: string
+  currentUsername?: string
   onSendMessage: (content: string) => void
 }
 
@@ -24,6 +28,8 @@ export function MeetingSidebar({
   setActiveTab,
   participants,
   messages,
+  currentUserId,
+  currentUsername,
   onSendMessage,
 }: MeetingSidebarProps) {
   return (
@@ -49,7 +55,13 @@ export function MeetingSidebar({
         </div>
 
         <TabsContent value="chat" className="flex-1 flex flex-col m-0 overflow-hidden">
-          <ChatPanel messages={messages} participants={participants} onSendMessage={onSendMessage} />
+          <ChatPanel
+            messages={messages}
+            participants={participants}
+            currentUserId={currentUserId}
+            currentUsername={currentUsername}
+            onSendMessage={onSendMessage}
+          />
         </TabsContent>
 
         <TabsContent value="participants" className="flex-1 m-0 overflow-hidden">

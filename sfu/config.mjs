@@ -1,9 +1,43 @@
 import os from "os"
 
+let resolvedAnnouncedIp = process.env.MEDIASOUP_ANNOUNCED_IP || null
+
+export async function resolveAnnouncedIp() {
+  if (resolvedAnnouncedIp && resolvedAnnouncedIp !== "127.0.0.1") {
+    return resolvedAnnouncedIp
+  }
+
+  // Auto-detect public IP on cloud deployments (Render, AWS, etc.)
+  try {
+    const res = await fetch("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(3000) })
+    const data = await res.json()
+    if (data?.ip) {
+      resolvedAnnouncedIp = data.ip
+      console.log(`[SFU] Auto-detected public WebRTC IP: ${resolvedAnnouncedIp}`)
+      return resolvedAnnouncedIp
+    }
+  } catch (err) {
+    console.warn(`[SFU] Could not auto-detect public IP, defaulting to 127.0.0.1: ${err.message}`)
+  }
+
+  resolvedAnnouncedIp = "127.0.0.1"
+  return resolvedAnnouncedIp
+}
+
+export async function getWebRtcListenIps() {
+  const announcedIp = await resolveAnnouncedIp()
+  return [
+    {
+      ip: process.env.MEDIASOUP_LISTEN_IP || "0.0.0.0",
+      announcedIp: announcedIp,
+    },
+  ]
+}
+
 export const config = {
   // HTTP / WebSocket port
-  listenPort: process.env.PORT || 4000,
-  
+  listenPort: process.env.PORT || 5000,
+
   // Mediasoup Worker settings
   mediasoup: {
     numWorkers: Math.max(1, Object.keys(os.cpus()).length),
@@ -54,12 +88,6 @@ export const config = {
     },
     // WebRtcTransport settings
     webRtcTransport: {
-      listenIps: [
-        {
-          ip: process.env.MEDIASOUP_LISTEN_IP || "0.0.0.0",
-          announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || "127.0.0.1",
-        },
-      ],
       initialAvailableOutgoingBitrate: 1000000,
       maxSctpMessageSize: 262144,
       enableUdp: true,

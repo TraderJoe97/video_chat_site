@@ -307,28 +307,34 @@ export function useMediasoup({
           const remoteUserId = producerData.producerUserId
           setRemoteStreams((prev) => {
             const next = new Map(prev)
-            const existing = next.get(remoteUserId) || {
-              userId: remoteUserId,
-              username: producerData.producerUsername || remoteUserId,
-              stream: new MediaStream(),
-              isAudioEnabled: true,
-              isVideoEnabled: true,
-            }
+            const existing = next.get(remoteUserId)
 
-            // Replace or add track
+            let audioConsumer = existing?.audioConsumer
+            let videoConsumer = existing?.videoConsumer
+
             if (consumer.kind === "video") {
-              const currentVideoTrack = existing.stream.getVideoTracks()[0]
-              if (currentVideoTrack) existing.stream.removeTrack(currentVideoTrack)
-              existing.stream.addTrack(consumer.track)
-              existing.videoConsumer = consumer
+              videoConsumer = consumer
             } else if (consumer.kind === "audio") {
-              const currentAudioTrack = existing.stream.getAudioTracks()[0]
-              if (currentAudioTrack) existing.stream.removeTrack(currentAudioTrack)
-              existing.stream.addTrack(consumer.track)
-              existing.audioConsumer = consumer
+              audioConsumer = consumer
             }
 
-            next.set(remoteUserId, existing)
+            const tracks: MediaStreamTrack[] = []
+            if (audioConsumer?.track) tracks.push(audioConsumer.track)
+            if (videoConsumer?.track) tracks.push(videoConsumer.track)
+
+            const stream = new MediaStream(tracks)
+
+            next.set(remoteUserId, {
+              userId: remoteUserId,
+              username: producerData.producerUsername || existing?.username || remoteUserId,
+              stream,
+              audioConsumer,
+              videoConsumer,
+              isAudioEnabled: audioConsumer ? !audioConsumer.paused : true,
+              isVideoEnabled: videoConsumer ? !videoConsumer.paused : true,
+            })
+
+            console.log(`[Mediasoup] Remote stream active for ${remoteUserId} (${tracks.length} tracks: ${tracks.map((t) => t.kind).join(", ")})`)
             return next
           })
         } catch (err: any) {

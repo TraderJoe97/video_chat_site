@@ -314,7 +314,15 @@ export default function MeetingPage() {
               activeTab={activeTab}
               setActiveTab={setActiveTab}
               participants={participants.map((p) => ({ id: p.userId, name: p.username, hasHandRaised: p.isHandRaised }))}
-              messages={messages.map((m) => ({ senderId: m.senderId, content: m.content, timestamp: m.timestamp }))}
+              messages={messages.map((m) => ({
+                senderId: m.senderId,
+                senderName: m.senderName,
+                content: m.content,
+                timestamp: m.timestamp,
+                isFromCurrentUser: m.senderId === userId || m.isFromCurrentUser,
+              }))}
+              currentUserId={userId}
+              currentUsername={username}
               onSendMessage={handleSendMessage}
             />
           </aside>

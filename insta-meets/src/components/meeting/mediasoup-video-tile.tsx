@@ -33,7 +33,12 @@ export function MediasoupVideoTile({
 
   // Attach media stream to video and audio elements
   useEffect(() => {
+    const videoElement = videoRef.current
+    const audioElement = audioRef.current
+
     if (!stream) {
+      if (videoElement) videoElement.srcObject = null
+      if (audioElement) audioElement.srcObject = null
       setHasRenderableVideo(false)
       return
     }
@@ -41,23 +46,31 @@ export function MediasoupVideoTile({
     const videoTracks = stream.getVideoTracks()
     const audioTracks = stream.getAudioTracks()
 
-    if (videoRef.current) {
+    if (videoElement) {
       if (videoTracks.length > 0 && isVideoEnabled) {
-        videoRef.current.srcObject = stream
-        videoRef.current.play().catch(() => {})
+        if (videoElement.srcObject !== stream) {
+          videoElement.srcObject = stream
+        }
+        videoElement.play().catch(() => {})
         setHasRenderableVideo(true)
       } else {
-        videoRef.current.srcObject = null
+        videoElement.srcObject = null
         setHasRenderableVideo(false)
       }
     }
 
     // Attach audio track for remote participants
-    if (!isLocal && audioRef.current && audioTracks.length > 0) {
-      audioRef.current.srcObject = stream
-      audioRef.current.play().catch((err) => {
-        console.warn(`[MediasoupVideoTile] Audio playback error for ${username}:`, err.message)
-      })
+    if (!isLocal && audioElement) {
+      if (audioTracks.length > 0) {
+        if (audioElement.srcObject !== stream) {
+          audioElement.srcObject = stream
+        }
+        audioElement.play().catch((err) => {
+          console.warn(`[MediasoupVideoTile] Audio playback error for ${username}:`, err.message)
+        })
+      } else {
+        audioElement.srcObject = null
+      }
     }
   }, [stream, isVideoEnabled, isLocal, username])
 
