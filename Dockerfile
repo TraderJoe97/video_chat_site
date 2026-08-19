@@ -1,7 +1,7 @@
-# Unified Production Dockerfile: .NET Backend + Mediasoup SFU (Strict Low-Memory Sequential Pipeline)
+# Unified Production Dockerfile: .NET 9 Backend + Mediasoup SFU (Ubuntu Noble for Prebuilt Binary)
 
 # --- Stage 1: Build .NET Backend ---
-FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS dotnet-build
+FROM mcr.microsoft.com/dotnet/sdk:9.0-noble AS dotnet-build
 WORKDIR /src/backend
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
@@ -11,34 +11,11 @@ RUN dotnet restore --disable-parallel
 COPY backend/ .
 RUN dotnet publish -c Release -o /app/backend -m:1 --no-restore
 
-# --- Stage 2: Build Mediasoup SFU (Single-thread build, python-is-python3 + pip) ---
-FROM node:22-bookworm-slim AS sfu-build
-WORKDIR /src/sfu
-ENV MEDIASOUP_BUILD_WORKER_CONCURRENT_NUMBER=1
-ENV npm_config_jobs=1
-
-# Install python3, pip, python-is-python3 (creates /usr/bin/python symlink), and build-essential
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    python-is-python3 \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Force Docker BuildKit to wait for dotnet-build to finish before starting sfu-build
-COPY --from=dotnet-build /app/backend/Backend.dll /tmp/stage1-barrier
-COPY sfu/package.json sfu/package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund
-COPY sfu/ .
-
-# --- Stage 3: Minimal Unified Runtime Image ---
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS runtime
+# --- Stage 2: Unified Runtime with Node.js 22 & Prebuilt Mediasoup SFU ---
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-noble AS runtime
 WORKDIR /app
 
-# Force Docker BuildKit to wait for sfu-build before doing runtime package install
-COPY --from=sfu-build /src/sfu/package.json /tmp/stage2-barrier
-
-# Install Node.js 22 & Supervisor
+# Install Node.js 22 and Supervisor on Ubuntu Noble
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     supervisor \
@@ -46,11 +23,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.npm /root/.cache
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy artifacts from prior stages
+# Install SFU dependencies using the official prebuilt binary (Zero compilation, <200MB RAM)
+WORKDIR /app/sfu
+COPY sfu/package.json sfu/package-lock.json* ./
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY sfu/ .
+
+# Copy .NET published output
+WORKDIR /app
 COPY --from=dotnet-build /app/backend /app/backend
-COPY --from=sfu-build /src/sfu /app/sfu
 COPY supervisord.conf /etc/supervisord.conf
 
 # Expose ports:
