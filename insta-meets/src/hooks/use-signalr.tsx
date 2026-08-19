@@ -42,7 +42,7 @@ export function useSignalR({
   onReceiveMessage,
   onHandRaised,
   onMediaStatusChanged,
-  backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? "" : "http://localhost:5000"),
+  backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:5000" : "https://video-chat-site.onrender.com"),
 }: UseSignalRProps) {
   const [isConnected, setIsConnected] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
@@ -51,10 +51,12 @@ export function useSignalR({
   useEffect(() => {
     if (!meetingId || !userId) return
 
-    console.log(`[SignalR] Initializing HubConnection to ${backendUrl}/hubs/meeting`)
+    const normalizedBackendUrl = backendUrl.replace(/\/$/, "")
+    const hubUrl = `${normalizedBackendUrl}/hubs/meeting`
+    console.log(`[SignalR] Initializing HubConnection to ${hubUrl}`)
 
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(`${backendUrl}/hubs/meeting`, {
+      .withUrl(hubUrl, {
         skipNegotiation: false,
         transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.LongPolling,
       })

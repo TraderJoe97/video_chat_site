@@ -1,12 +1,16 @@
-// API functions for interacting with the .NET meeting server and Supabase backend via Next.js Proxy
+// API functions for interacting with the .NET meeting server and Supabase backend
 
 function getBackendUrl(): string {
-  // In the browser, use relative paths so requests route through Next.js proxy rewrites
-  if (typeof window !== "undefined") {
-    return ""
+  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+    return process.env.NEXT_PUBLIC_BACKEND_URL.replace(/\/$/, "")
   }
-  // On server-side rendering, use configured backend URL
-  return process.env.BACKEND_URL || "http://localhost:5000"
+  if (process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL.replace(/\/$/, "")
+  }
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") {
+    return "http://localhost:5000"
+  }
+  return "https://video-chat-site.onrender.com"
 }
 
 export interface MeetingDto {

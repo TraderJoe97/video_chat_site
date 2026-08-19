@@ -33,7 +33,7 @@ export function useMediasoup({
   userId,
   username,
   localStream,
-  sfuUrl = process.env.NEXT_PUBLIC_SFU_URL || process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:5000"),
+  sfuUrl = process.env.NEXT_PUBLIC_SFU_URL || process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:5000" : "https://video-chat-site.onrender.com"),
 }: UseMediasoupProps) {
   const [isSfuConnected, setIsSfuConnected] = useState(false)
   const [remoteStreams, setRemoteStreams] = useState<Map<string, RemoteParticipantStream>>(new Map())
