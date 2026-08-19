@@ -361,6 +361,14 @@ export function usePeerConnections({
 
     const handleOffer = (data: { callerId: string; offer: Peer.SignalData; callerUsername?: string }) => {
       console.log(`[PeerConnections] Received offer from ${data.callerId} (${data.callerUsername || "unknown"})`)
+      
+      // Defensively check if this is actually a candidate or answer signal mislabeled as offer
+      if (data.offer && (data.offer.type === "answer" || ("candidate" in data.offer && data.offer.candidate))) {
+        console.log(`[PeerConnections] Misrouted signal in offer event, redirecting to safelySignalPeer`)
+        safelySignalPeer(data.callerId, data.offer)
+        return
+      }
+
       const streamToUse = isAudioOnlyMode ? audioStreamRef.current : streamRef.current
       if (!streamToUse) {
         console.warn(`[PeerConnections] No stream available to answer offer from ${data.callerId}`)
