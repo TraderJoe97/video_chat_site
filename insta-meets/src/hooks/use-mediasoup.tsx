@@ -47,9 +47,11 @@ export function useMediasoup({
   const videoProducerRef = useRef<Producer | null>(null)
   const consumersRef = useRef<Map<string, Consumer>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
+  const usernameRef = useRef<string>(username)
   const isMountedRef = useRef(true)
 
   localStreamRef.current = localStream
+  usernameRef.current = username || userId
 
   useEffect(() => {
     isMountedRef.current = true
@@ -58,7 +60,7 @@ export function useMediasoup({
     }
   }, [])
 
-  // 1. Initialize SFU Connection & Device (Independent of localStream to prevent reconnects)
+  // 1. Initialize SFU Connection & Device (Stable lifecycle tied strictly to meetingId and userId)
   useEffect(() => {
     if (!meetingId || !userId) return
 
@@ -80,7 +82,7 @@ export function useMediasoup({
       // Join SFU room & get router RTP capabilities
       socket.emit(
         "join-room",
-        { meetingId, userId, username: username || userId },
+        { meetingId, userId, username: usernameRef.current || userId },
         async (data: { rtpCapabilities?: RtpCapabilities; error?: string }) => {
           if (data?.error || !data?.rtpCapabilities) {
             console.error("[Mediasoup] Failed to join SFU room:", data?.error)
@@ -120,8 +122,12 @@ export function useMediasoup({
       )
     })
 
-    socket.on("disconnect", () => {
-      console.warn("[Mediasoup] Disconnected from SFU")
+    socket.on("connect_error", (err) => {
+      console.error("[Mediasoup] Connection error:", err.message)
+    })
+
+    socket.on("disconnect", (reason) => {
+      console.warn("[Mediasoup] Disconnected from SFU:", reason)
       setIsSfuConnected(false)
     })
 
@@ -142,7 +148,7 @@ export function useMediasoup({
     })
 
     // Producer closed
-    socket.on("consumer-closed", ({ consumerId, producerId }: { consumerId: string; producerId: string }) => {
+    socket.on("consumer-closed", ({ consumerId }: { consumerId: string }) => {
       const consumer = consumersRef.current.get(consumerId)
       if (consumer) {
         consumer.close()
@@ -187,7 +193,7 @@ export function useMediasoup({
       if (recvTransportRef.current) recvTransportRef.current.close()
       socket.disconnect()
     }
-  }, [meetingId, userId, username, sfuUrl])
+  }, [meetingId, userId, sfuUrl])
 
   // Helper: Create Send WebRtcTransport
   const initSendTransport = async (socket: Socket, device: Device) => {
