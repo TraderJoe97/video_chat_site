@@ -382,14 +382,33 @@ export function usePeerConnections({
       safelySignalPeer(data.callerId, data.answer)
     }
 
-    const handleCandidate = (data: { callerId: string; candidate: RTCIceCandidateInit | { candidate: RTCIceCandidateInit } }) => {
-      const candidateObj =
-        typeof data.candidate === "object" && data.candidate !== null && "candidate" in data.candidate
-          ? data.candidate.candidate
-          : data.candidate
+    const handleCandidate = (data: { callerId: string; candidate: any }) => {
+      if (!data || !data.candidate) return
+
+      let candidateObj = data.candidate
+
+      // If nested inside an extra candidate wrapper { candidate: { candidate: "...", sdpMid: ... } }
+      if (
+        typeof candidateObj === "object" &&
+        candidateObj !== null &&
+        typeof candidateObj.candidate === "object" &&
+        candidateObj.candidate !== null
+      ) {
+        candidateObj = candidateObj.candidate
+      }
+
+      // If it's a raw string (e.g. "candidate:..."), construct a valid RTCIceCandidateInit object
+      if (typeof candidateObj === "string") {
+        candidateObj = {
+          candidate: candidateObj,
+          sdpMid: "0",
+          sdpMLineIndex: 0,
+        }
+      }
+
       const signalPayload: Peer.SignalData = {
         type: "candidate",
-        candidate: candidateObj as RTCIceCandidate,
+        candidate: candidateObj,
       }
       safelySignalPeer(data.callerId, signalPayload)
     }

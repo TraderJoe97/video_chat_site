@@ -398,11 +398,12 @@ export default function MeetingPage() {
 
     // Handle chat messages
     const handleMessage = (message: Message) => {
-      if (message.senderId === userId || message.isFromCurrentUser) {
+      // Ignore if message was sent by ourselves (already added optimistically)
+      if (message.senderId === userId) {
         return
       }
       console.log(`[Meeting] Received message from ${message.senderId}: ${message.content}`)
-      setMessages((prev) => [...prev, message])
+      setMessages((prev) => [...prev, { ...message, isFromCurrentUser: false }])
     }
 
     // Handle hand raise
@@ -709,24 +710,27 @@ export default function MeetingPage() {
       if (!socket || !userId || !content.trim()) return
 
       console.log(`[Meeting] Sending message: ${content}`)
-      const messageData = {
+      const timestamp = new Date().toISOString()
+      const messagePayload = {
         meetingId,
         senderId: userId,
         content,
-        timestamp: new Date().toISOString(),
-        isFromCurrentUser: true // Mark as from current user to prevent duplicates
+        timestamp,
       }
 
-      socket.emit("message", messageData)
+      // Emit to server without isFromCurrentUser so other recipients don't filter it out
+      socket.emit("message", messagePayload)
 
-      // Add to local messages with a flag to indicate it's from the current user
-      // This helps with styling in the UI
-      setMessages((prev) => [...prev, {
-        ...messageData,
-        isFromCurrentUser: true
-      }])
+      // Add to local messages marked as from current user
+      setMessages((prev) => [
+        ...prev,
+        {
+          ...messagePayload,
+          isFromCurrentUser: true,
+        },
+      ])
     },
-    [socket, userId, meetingId]
+    [socket, userId, meetingId],
   )
 
   // Show loading state while determining auth or fetching ICE servers
