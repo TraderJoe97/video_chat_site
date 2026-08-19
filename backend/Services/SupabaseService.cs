@@ -16,6 +16,7 @@ public class SupabaseService
 
     public SupabaseService(IConfiguration configuration, ILogger<SupabaseService> logger)
     {
+        _logger = logger;
         _supabaseUrl = configuration["SUPABASE_URL"] ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
         _supabaseKey = configuration["SUPABASE_SECRET_KEY"]
             ?? configuration["SUPABASE_KEY"]
