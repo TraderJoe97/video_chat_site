@@ -1,24 +1,39 @@
-// API functions for interacting with the meeting server
+// API functions for interacting with the .NET meeting server and Supabase backend via Next.js Proxy
 
 function getBackendUrl(): string {
-  if (process.env.NEXT_PUBLIC_BACKEND_URL) return process.env.NEXT_PUBLIC_BACKEND_URL
-  if (process.env.BACKEND_URL) return process.env.BACKEND_URL
+  // In the browser, use relative paths so requests route through Next.js proxy rewrites
   if (typeof window !== "undefined") {
-    const saved = localStorage.getItem("BACKEND_URL")
-    if (saved) return saved
+    return ""
   }
-  return "http://localhost:4000"
+  // On server-side rendering, use configured backend URL
+  return process.env.BACKEND_URL || "http://localhost:5000"
+}
+
+export interface MeetingDto {
+  meetingId: string
+  hostId: string
+  meetingName: string
+  createdAt: string
+}
+
+export interface ChatMessageDto {
+  id: string
+  meetingId: string
+  senderId: string
+  senderName: string
+  content: string
+  timestamp: string
 }
 
 /**
  * Creates a new meeting on the server
  */
-export async function createMeeting(hostId: string, meetingName = "Untitled Meeting") {
+export async function createMeeting(hostId: string, meetingName = "Untitled Meeting"): Promise<MeetingDto> {
   const backendUrl = getBackendUrl()
   const meetingId = generateMeetingId()
 
   try {
-    const response = await fetch(`${backendUrl}/create-meeting`, {
+    const response = await fetch(`${backendUrl}/api/meetings`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -38,7 +53,7 @@ export async function createMeeting(hostId: string, meetingName = "Untitled Meet
     return data
   } catch (error) {
     console.error("Error creating meeting:", error)
-    // Fall back to returning the meeting ID if the server request fails
+    // Fall back to returning local meeting ID
     return { meetingId, hostId, meetingName, createdAt: new Date().toISOString() }
   }
 }
@@ -46,11 +61,11 @@ export async function createMeeting(hostId: string, meetingName = "Untitled Meet
 /**
  * Fetches all meetings from the server
  */
-export async function fetchMeetings() {
+export async function fetchMeetings(): Promise<MeetingDto[]> {
   const backendUrl = getBackendUrl()
 
   try {
-    const response = await fetch(`${backendUrl}/test-meetings`)
+    const response = await fetch(`${backendUrl}/api/meetings`)
 
     if (!response.ok) {
       throw new Error(`Failed to fetch meetings: ${response.statusText}`)
@@ -60,6 +75,27 @@ export async function fetchMeetings() {
     return Array.isArray(data) ? data : []
   } catch (error) {
     console.error("Error fetching meetings:", error)
+    return []
+  }
+}
+
+/**
+ * Fetches chat history for a meeting
+ */
+export async function fetchChatHistory(meetingId: string): Promise<ChatMessageDto[]> {
+  const backendUrl = getBackendUrl()
+
+  try {
+    const response = await fetch(`${backendUrl}/api/meetings/${meetingId}/messages`)
+
+    if (!response.ok) {
+      return []
+    }
+
+    const data = await response.json()
+    return Array.isArray(data) ? data : []
+  } catch (error) {
+    console.error("Error fetching chat history:", error)
     return []
   }
 }
@@ -86,30 +122,23 @@ export async function checkServerHealth() {
 }
 
 /**
- * Generates a random meeting ID
- */
-function generateMeetingId() {
-  return Math.random().toString(36).substring(2, 10)
-}
-
-/**
  * Checks if a meeting exists
  */
 export async function checkMeetingExists(meetingId: string) {
   const backendUrl = getBackendUrl()
 
   try {
-    const response = await fetch(`${backendUrl}/test-meetings`)
-
-    if (!response.ok) {
-      return true // Assume meeting exists if we can't check
-    }
-
-    const meetings = await response.json()
-    if (!Array.isArray(meetings)) return true
-    return meetings.some((meeting: { meetingId: string }) => meeting.meetingId === meetingId)
+    const response = await fetch(`${backendUrl}/api/meetings/${meetingId}`)
+    return response.ok
   } catch (error) {
     console.error("Error checking if meeting exists:", error)
-    return true // Assume meeting exists if we can't check
+    return true // Assume exists on error
   }
+}
+
+/**
+ * Generates a random meeting ID
+ */
+function generateMeetingId() {
+  return Math.random().toString(36).substring(2, 10)
 }

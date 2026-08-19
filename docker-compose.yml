@@ -1,0 +1,19 @@
+services:
+  backend-sfu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: instameets-backend-sfu
+    restart: unless-stopped
+    ports:
+      - "5000:5000"           # .NET REST API & SignalR Hub
+      - "4000:4000"           # Mediasoup SFU Signaling
+      - "20000-20100:20000-20100/udp" # WebRTC RTP/RTCP Media Traffic
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+      - PORT=4000
+      - MEDIASOUP_LISTEN_IP=0.0.0.0
+      - MEDIASOUP_ANNOUNCED_IP=127.0.0.1
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
