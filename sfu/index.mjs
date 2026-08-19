@@ -3,17 +3,59 @@ import express from "express"
 import cors from "cors"
 import { Server } from "socket.io"
 import * as mediasoup from "mediasoup"
+import { createProxyMiddleware } from "http-proxy-middleware"
 import { config } from "./config.mjs"
 
 const app = express()
 app.use(cors())
-app.use(express.json())
 
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", service: "mediasoup-sfu", workers: workers.length })
+const DOTNET_URL = process.env.DOTNET_BACKEND_URL || "http://127.0.0.1:5001"
+
+// 1. Proxy SignalR Hub to .NET backend
+const signalrProxy = createProxyMiddleware({
+  target: DOTNET_URL,
+  changeOrigin: true,
+  ws: true,
+  logger: console,
+})
+app.use("/hubs", signalrProxy)
+
+// 2. Proxy .NET REST APIs
+const apiProxy = createProxyMiddleware({
+  target: DOTNET_URL,
+  changeOrigin: true,
+  logger: console,
+})
+app.use("/api/meetings", apiProxy)
+
+// 3. Unified Health Check Endpoint for Cloud Deployments
+app.get("/api/health", async (req, res) => {
+  let dotnetStatus = "initializing"
+  try {
+    const r = await fetch(`${DOTNET_URL}/api/health`, { signal: AbortSignal.timeout(2000) })
+    if (r.ok) dotnetStatus = "ok"
+  } catch {
+    dotnetStatus = "starting"
+  }
+
+  res.json({
+    status: "ok",
+    sfu: { status: "ok", workers: workers.length },
+    dotnet: dotnetStatus,
+  })
 })
 
+app.use(express.json())
+
 const httpServer = http.createServer(app)
+
+// Handle WebSocket upgrade for SignalR Hub
+httpServer.on("upgrade", (req, socket, head) => {
+  if (req.url && req.url.startsWith("/hubs")) {
+    signalrProxy.upgrade(req, socket, head)
+  }
+})
+
 const io = new Server(httpServer, {
   cors: {
     origin: "*",
@@ -54,106 +96,78 @@ async function initMediasoupWorkers() {
   console.log(`[SFU] ${workers.length} Mediasoup worker(s) successfully running.`)
 }
 
-// Helper: Get round-robin worker
-function getWorker() {
-  const worker = workers[nextWorkerIdx]
-  nextWorkerIdx = (nextWorkerIdx + 1) % workers.length
-  return worker
-}
-
-// Helper: Get or Create Router for a Meeting Room
+// Helper: Get or Create Router for Meeting Room
 async function getOrCreateRoomRouter(meetingId) {
   let router = rooms.get(meetingId)
   if (!router) {
-    const worker = getWorker()
+    const worker = workers[nextWorkerIdx]
+    nextWorkerIdx = (nextWorkerIdx + 1) % workers.length
+
     router = await worker.createRouter({
       mediaCodecs: config.mediasoup.router.mediaCodecs,
     })
+
     rooms.set(meetingId, router)
-    console.log(`[SFU] Created media router for meeting ${meetingId}`)
+    console.log(`[SFU] Created new Router for meeting ${meetingId} on worker ${worker.pid}`)
   }
   return router
 }
 
-// Helper: Create WebRtcTransport
-async function createWebRtcTransport(router) {
-  const { webRtcTransport: transportSettings } = config.mediasoup
-  const transport = await router.createWebRtcTransport({
-    listenIps: transportSettings.listenIps,
-    enableUdp: transportSettings.enableUdp,
-    enableTcp: transportSettings.enableTcp,
-    preferUdp: transportSettings.preferUdp,
-    initialAvailableOutgoingBitrate: transportSettings.initialAvailableOutgoingBitrate,
-  })
-
-  // Max bitrate limits
-  await transport.setMaxIncomingBitrate(1500000)
-
-  return transport
-}
-
-// Socket Signaling Handling
+// Socket.io Connection & Signaling Handshake
 io.on("connection", (socket) => {
-  console.log(`[SFU] Client connected: ${socket.id}`)
+  console.log(`[SFU] Client connected: socket ID ${socket.id}`)
 
-  // 1. Join SFU Room & Get Router RTP Capabilities
-  socket.on("join-sfu-room", async ({ meetingId, userId, username }, callback) => {
+  // 1. Join Room & Exchange Router RTP Capabilities
+  socket.on("join-room", async ({ meetingId, userId, username }, callback) => {
     try {
-      console.log(`[SFU] Peer ${username} (${userId}) joining meeting ${meetingId}`)
-      socket.join(meetingId)
-
       const router = await getOrCreateRoomRouter(meetingId)
 
-      // Initialize peer state
+      // Register peer state
       peers.set(socket.id, {
         meetingId,
         userId,
-        username,
+        username: username || "Guest",
         transports: new Map(),
         producers: new Map(),
         consumers: new Map(),
       })
 
-      // Send router RTP capabilities back so client mediasoup Device can load
+      socket.join(meetingId)
+      console.log(`[SFU] User ${username} (${userId}) joined meeting room ${meetingId}`)
+
+      // Return RTP capabilities to client Device
       callback({
         rtpCapabilities: router.rtpCapabilities,
       })
 
-      // Inform client about existing producers in the room
-      const existingProducers = []
-      for (const [otherSocketId, otherPeer] of peers.entries()) {
-        if (otherSocketId !== socket.id && otherPeer.meetingId === meetingId) {
-          for (const [prodId, prod] of otherPeer.producers.entries()) {
-            existingProducers.push({
-              producerId: prodId,
-              producerUserId: otherPeer.userId,
-              producerUsername: otherPeer.username,
-              kind: prod.kind,
-              appData: prod.appData,
-            })
-          }
-        }
-      }
-
-      if (existingProducers.length > 0) {
-        socket.emit("existing-producers", existingProducers)
-      }
+      // Inform existing participants
+      socket.to(meetingId).emit("peer-joined", { userId, username })
     } catch (error) {
-      console.error("[SFU] Error in join-sfu-room:", error)
+      console.error("[SFU] Error in join-room:", error)
       callback({ error: error.message })
     }
   })
 
-  // 2. Create WebRTC Transport (direction: 'send' | 'recv')
+  // 2. Create WebRtcTransport (Send or Recv direction)
   socket.on("create-transport", async ({ direction }, callback) => {
-    const peer = peers.get(socket.id)
-    if (!peer) return callback({ error: "Peer not found" })
-
     try {
-      const router = rooms.get(peer.meetingId)
-      if (!router) return callback({ error: "Router not found" })
+      const peer = peers.get(socket.id)
+      if (!peer) throw new Error("Peer not found in room")
 
-      const transport = await createWebRtcTransport(router)
+      const router = rooms.get(peer.meetingId)
+      if (!router) throw new Error("Router not found for meeting")
+
+      const { webRtcTransport: transportOptions } = config.mediasoup
+
+      const transport = await router.createWebRtcTransport({
+        listenIps: transportOptions.listenIps,
+        enableUdp: transportOptions.enableUdp,
+        enableTcp: transportOptions.enableTcp,
+        preferUdp: transportOptions.preferUdp,
+        initialAvailableOutgoingBitrate: transportOptions.initialAvailableOutgoingBitrate,
+        maxSctpMessageSize: transportOptions.maxSctpMessageSize,
+      })
+
       peer.transports.set(transport.id, transport)
 
       transport.on("dtlsstatechange", (dtlsState) => {
@@ -163,96 +177,102 @@ io.on("connection", (socket) => {
       })
 
       transport.on("close", () => {
-        console.log(`[SFU] Transport ${transport.id} closed for peer ${peer.userId}`)
+        console.log(`[SFU] Transport ${transport.id} closed for peer ${peer.username}`)
       })
+
+      console.log(`[SFU] Created ${direction} transport ${transport.id} for ${peer.username}`)
 
       callback({
         id: transport.id,
         iceParameters: transport.iceParameters,
         iceCandidates: transport.iceCandidates,
         dtlsParameters: transport.dtlsParameters,
+        sctpParameters: transport.sctpParameters,
       })
     } catch (error) {
-      console.error("[SFU] Error creating transport:", error)
+      console.error("[SFU] Error in create-transport:", error)
       callback({ error: error.message })
     }
   })
 
   // 3. Connect Transport (DTLS parameters handshake)
   socket.on("connect-transport", async ({ transportId, dtlsParameters }, callback) => {
-    const peer = peers.get(socket.id)
-    if (!peer) return callback({ error: "Peer not found" })
-
     try {
+      const peer = peers.get(socket.id)
+      if (!peer) throw new Error("Peer not found")
+
       const transport = peer.transports.get(transportId)
-      if (!transport) return callback({ error: "Transport not found" })
+      if (!transport) throw new Error(`Transport ${transportId} not found`)
 
       await transport.connect({ dtlsParameters })
+      console.log(`[SFU] Transport ${transportId} connected for ${peer.username}`)
+
       callback({ connected: true })
     } catch (error) {
-      console.error("[SFU] Error connecting transport:", error)
+      console.error("[SFU] Error in connect-transport:", error)
       callback({ error: error.message })
     }
   })
 
-  // 4. Produce Media (Publish Audio / Video track)
+  // 4. Produce Media (Publish Audio / Video track to SFU Router)
   socket.on("produce", async ({ transportId, kind, rtpParameters, appData }, callback) => {
-    const peer = peers.get(socket.id)
-    if (!peer) return callback({ error: "Peer not found" })
-
     try {
+      const peer = peers.get(socket.id)
+      if (!peer) throw new Error("Peer not found")
+
       const transport = peer.transports.get(transportId)
-      if (!transport) return callback({ error: "Transport not found" })
+      if (!transport) throw new Error(`Transport ${transportId} not found`)
 
       const producer = await transport.produce({
         kind,
         rtpParameters,
-        appData: { ...appData, userId: peer.userId, username: peer.username },
+        appData: { ...appData, peerId: socket.id, userId: peer.userId, username: peer.username },
       })
 
       peer.producers.set(producer.id, producer)
 
       producer.on("transportclose", () => {
-        console.log(`[SFU] Producer ${producer.id} transport closed`)
         producer.close()
+        peer.producers.delete(producer.id)
       })
 
-      // Notify all other clients in the room about the new producer
+      console.log(`[SFU] Producer ${producer.id} (${kind}) published by ${peer.username}`)
+
+      callback({ id: producer.id })
+
+      // Notify other peers in room that a new producer is available
       socket.to(peer.meetingId).emit("new-producer", {
         producerId: producer.id,
         producerUserId: peer.userId,
         producerUsername: peer.username,
         kind: producer.kind,
-        appData: producer.appData,
       })
-
-      callback({ id: producer.id })
     } catch (error) {
-      console.error("[SFU] Error producing media:", error)
+      console.error("[SFU] Error in produce:", error)
       callback({ error: error.message })
     }
   })
 
-  // 5. Consume Media (Subscribe to remote peer's track)
+  // 5. Consume Media (Subscribe to remote peer's audio / video stream)
   socket.on("consume", async ({ transportId, producerId, rtpCapabilities }, callback) => {
-    const peer = peers.get(socket.id)
-    if (!peer) return callback({ error: "Peer not found" })
-
     try {
+      const peer = peers.get(socket.id)
+      if (!peer) throw new Error("Peer not found")
+
       const router = rooms.get(peer.meetingId)
-      if (!router) return callback({ error: "Router not found" })
+      if (!router) throw new Error("Router not found")
 
       if (!router.canConsume({ producerId, rtpCapabilities })) {
-        return callback({ error: "Cannot consume producer with provided capabilities" })
+        throw new Error("Client cannot consume this producer")
       }
 
       const transport = peer.transports.get(transportId)
-      if (!transport) return callback({ error: "Transport not found" })
+      if (!transport) throw new Error(`Transport ${transportId} not found`)
 
       const consumer = await transport.consume({
         producerId,
         rtpCapabilities,
-        paused: true, // Start paused, resume after client setup
+        paused: true, // Start paused, resume on client ready
       })
 
       peer.consumers.set(consumer.id, consumer)
@@ -263,80 +283,114 @@ io.on("connection", (socket) => {
       })
 
       consumer.on("producerclose", () => {
-        socket.emit("consumer-closed", { consumerId: consumer.id, producerId })
         consumer.close()
         peer.consumers.delete(consumer.id)
+        socket.emit("consumer-closed", { consumerId: consumer.id, producerId })
       })
+
+      console.log(`[SFU] Consumer ${consumer.id} (${consumer.kind}) created for ${peer.username}`)
 
       callback({
         id: consumer.id,
         producerId,
         kind: consumer.kind,
         rtpParameters: consumer.rtpParameters,
-        appData: consumer.appData,
       })
     } catch (error) {
-      console.error("[SFU] Error consuming media:", error)
+      console.error("[SFU] Error in consume:", error)
       callback({ error: error.message })
     }
   })
 
   // 6. Resume Consumer
   socket.on("resume-consumer", async ({ consumerId }, callback) => {
-    const peer = peers.get(socket.id)
-    if (!peer) return callback({ error: "Peer not found" })
-
-    const consumer = peer.consumers.get(consumerId)
-    if (!consumer) return callback({ error: "Consumer not found" })
-
     try {
+      const peer = peers.get(socket.id)
+      if (!peer) throw new Error("Peer not found")
+
+      const consumer = peer.consumers.get(consumerId)
+      if (!consumer) throw new Error(`Consumer ${consumerId} not found`)
+
       await consumer.resume()
+      console.log(`[SFU] Consumer ${consumerId} resumed`)
+
       callback({ resumed: true })
     } catch (error) {
-      console.error("[SFU] Error resuming consumer:", error)
+      console.error("[SFU] Error in resume-consumer:", error)
       callback({ error: error.message })
     }
   })
 
-  // 7. Close Producer (e.g. video muted or screen share stopped)
-  socket.on("close-producer", ({ producerId }) => {
+  // 7. Pause/Resume Producer (Mute/Unmute audio or camera)
+  socket.on("pause-producer", async ({ producerId }, callback) => {
     const peer = peers.get(socket.id)
-    if (!peer) return
-
-    const producer = peer.producers.get(producerId)
+    const producer = peer?.producers.get(producerId)
     if (producer) {
-      producer.close()
-      peer.producers.delete(producerId)
-      socket.to(peer.meetingId).emit("producer-closed", { producerId, userId: peer.userId })
+      await producer.pause()
+      socket.to(peer.meetingId).emit("producer-paused", { producerId })
     }
+    if (callback) callback({ paused: true })
   })
 
-  // 8. Disconnect Cleanup
+  socket.on("resume-producer", async ({ producerId }, callback) => {
+    const peer = peers.get(socket.id)
+    const producer = peer?.producers.get(producerId)
+    if (producer) {
+      await producer.resume()
+      socket.to(peer.meetingId).emit("producer-resumed", { producerId })
+    }
+    if (callback) callback({ resumed: true })
+  })
+
+  // 8. Fetch Existing Producers in the Room
+  socket.on("get-producers", (callback) => {
+    const peer = peers.get(socket.id)
+    if (!peer) return callback([])
+
+    const producersList = []
+    for (const [otherSocketId, otherPeer] of peers.entries()) {
+      if (otherSocketId === socket.id) continue
+      if (otherPeer.meetingId !== peer.meetingId) continue
+
+      for (const [prodId, producer] of otherPeer.producers.entries()) {
+        producersList.push({
+          producerId: prodId,
+          producerUserId: otherPeer.userId,
+          producerUsername: otherPeer.username,
+          kind: producer.kind,
+        })
+      }
+    }
+
+    callback(producersList)
+  })
+
+  // 9. Disconnect & Cleanup
   socket.on("disconnect", () => {
     const peer = peers.get(socket.id)
     if (!peer) return
 
     console.log(`[SFU] Peer ${peer.username} (${peer.userId}) disconnected`)
 
-    // Close all producers and notify room
-    for (const [producerId, producer] of peer.producers.entries()) {
+    // Close all producers
+    for (const producer of peer.producers.values()) {
       producer.close()
-      socket.to(peer.meetingId).emit("producer-closed", { producerId, userId: peer.userId })
     }
-
     // Close all consumers
     for (const consumer of peer.consumers.values()) {
       consumer.close()
     }
-
     // Close all transports
     for (const transport of peer.transports.values()) {
       transport.close()
     }
 
+    // Notify room
+    socket.to(peer.meetingId).emit("peer-left", { userId: peer.userId })
+
     peers.delete(socket.id)
 
-    // Check if room has remaining peers; if empty, close router
+    // Check if room is empty to close router
     let remainingPeersInRoom = false
     for (const remainingPeer of peers.values()) {
       if (remainingPeer.meetingId === peer.meetingId) {
@@ -361,7 +415,7 @@ async function start() {
   await initMediasoupWorkers()
   const port = config.listenPort
   httpServer.listen(port, () => {
-    console.log(`[SFU] Mediasoup SFU listening on port ${port}`)
+    console.log(`[SFU] Mediasoup SFU & Reverse Proxy listening on port ${port}`)
   })
 }
 

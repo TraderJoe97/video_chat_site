@@ -215,7 +215,6 @@ export default function MeetingPage() {
 
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
-      // Revert to camera stream
       setIsScreenSharing(false)
       toast.info("Screen sharing ended")
     } else {
@@ -267,12 +266,14 @@ export default function MeetingPage() {
   }
 
   // 6. Loading and Authentication Guards
-  if (isAuthLoading) {
+  if (isAuthLoading || isInitializingMedia) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white">
-        <div className="w-12 h-12 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin mb-4" />
-        <h2 className="text-xl font-semibold">Connecting to InstaMeets...</h2>
-        <p className="text-sm text-slate-400 mt-1">Authenticating session</p>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mb-4" />
+        <h2 className="text-xl font-semibold">
+          {isAuthLoading ? "Authenticating session..." : "Preparing your camera & mic..."}
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">Connecting to InstaMeets</p>
       </div>
     )
   }
@@ -281,19 +282,9 @@ export default function MeetingPage() {
     return <JoinMeetingModal meetingId={meetingId} isOpen={true} onClose={() => {}} />
   }
 
-  if (isInitializingMedia) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white">
-        <div className="w-12 h-12 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin mb-4" />
-        <h2 className="text-xl font-semibold">Preparing your camera & mic...</h2>
-        <p className="text-sm text-slate-400 mt-1">Connecting to Mediasoup SFU</p>
-      </div>
-    )
-  }
-
   return (
-    <div ref={containerRef} className="flex flex-col h-screen bg-slate-950 text-white overflow-hidden select-none">
-      {/* 1. Header */}
+    <div ref={containerRef} className="flex flex-col h-screen bg-background text-foreground overflow-hidden select-none">
+      {/* 1. Header (themed identically to Dashboard) */}
       <MeetingHeader
         meetingId={meetingId}
         isFullscreen={isFullscreen}
@@ -303,7 +294,7 @@ export default function MeetingPage() {
       />
 
       {/* 2. Main Content Area */}
-      <div className="flex-1 flex relative overflow-hidden">
+      <div className="flex-1 flex relative overflow-hidden bg-muted/20">
         {/* Video Grid */}
         <VideoGrid
           isSidebarOpen={isSidebarOpen}
@@ -318,7 +309,7 @@ export default function MeetingPage() {
 
         {/* Slide-out Sidebar */}
         {isSidebarOpen && (
-          <aside className="absolute right-0 top-0 bottom-0 w-full sm:w-96 bg-slate-900/95 backdrop-blur-2xl border-l border-slate-800/80 shadow-2xl z-30 flex flex-col transition-all duration-300">
+          <aside className="absolute right-0 top-0 bottom-0 w-full sm:w-96 z-30 flex flex-col transition-all duration-300">
             <MeetingSidebar
               activeTab={activeTab}
               setActiveTab={setActiveTab}
@@ -330,7 +321,7 @@ export default function MeetingPage() {
         )}
       </div>
 
-      {/* 3. Floating Bottom Controls */}
+      {/* 3. Floating Controls */}
       <MeetingControls
         isAudioEnabled={isAudioEnabled}
         toggleAudio={toggleAudio}

@@ -27,20 +27,20 @@ export function MeetingSidebar({
   onSendMessage,
 }: MeetingSidebarProps) {
   return (
-    <div className="w-full h-full flex flex-col bg-slate-900/95 text-white">
+    <div className="w-full h-full flex flex-col bg-background text-foreground border-l border-border shadow-lg">
       <Tabs defaultValue="chat" value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-        <div className="p-3 border-b border-slate-800">
-          <TabsList className="grid grid-cols-2 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+        <div className="p-3 border-b border-border">
+          <TabsList className="grid grid-cols-2 bg-muted p-1 rounded-lg">
             <TabsTrigger
               value="chat"
-              className="rounded-lg text-xs font-medium data-[state=active]:bg-indigo-600 data-[state=active]:text-white transition-all gap-1.5"
+              className="rounded-md text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground transition-all gap-1.5"
             >
               <MessageSquare className="w-3.5 h-3.5" />
               <span>Chat</span>
             </TabsTrigger>
             <TabsTrigger
               value="participants"
-              className="rounded-lg text-xs font-medium data-[state=active]:bg-indigo-600 data-[state=active]:text-white transition-all gap-1.5"
+              className="rounded-md text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground transition-all gap-1.5"
             >
               <Users className="w-3.5 h-3.5" />
               <span>People ({participants.length})</span>

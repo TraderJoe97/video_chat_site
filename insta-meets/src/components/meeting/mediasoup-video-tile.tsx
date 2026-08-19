@@ -73,8 +73,8 @@ export function MediasoupVideoTile({
   return (
     <div
       className={cn(
-        "relative group rounded-2xl overflow-hidden bg-slate-900/90 border transition-all duration-300 backdrop-blur-md shadow-lg",
-        isSpeaking ? "border-emerald-500 ring-2 ring-emerald-500/50 shadow-emerald-950/40 shadow-xl" : "border-slate-800/80 hover:border-slate-700",
+        "relative group rounded-xl overflow-hidden bg-card border transition-all duration-300 shadow-sm",
+        isSpeaking ? "border-primary ring-2 ring-primary/40 shadow-md" : "border-border hover:border-primary/50",
         isHandRaised ? "ring-2 ring-amber-500/80" : "",
         className,
       )}
@@ -89,31 +89,31 @@ export function MediasoupVideoTile({
         muted={isLocal}
         playsInline
         className={cn(
-          "w-full h-full object-cover transition-opacity duration-300",
+          "w-full h-full object-cover transition-opacity duration-300 bg-muted",
           hasRenderableVideo && isVideoEnabled ? "opacity-100" : "opacity-0 absolute inset-0",
-          isLocal ? "-scale-x-100" : "", // Mirror local camera preview
+          isLocal ? "-scale-x-100" : "", // Mirror local preview
         )}
       />
 
       {/* Fallback avatar when video is off */}
       {(!hasRenderableVideo || !isVideoEnabled) && (
-        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white">
+        <div className="w-full h-full flex flex-col items-center justify-center bg-muted/60 text-foreground">
           <div
             className={cn(
-              "w-20 h-20 md:w-24 md:h-24 rounded-full flex items-center justify-center font-bold text-2xl md:text-3xl bg-gradient-to-tr from-indigo-600 to-violet-500 shadow-xl border-2 border-indigo-400/30 transition-transform duration-300 group-hover:scale-105",
-              isSpeaking ? "animate-pulse ring-4 ring-emerald-400/40" : "",
+              "w-20 h-20 md:w-24 md:h-24 rounded-full flex items-center justify-center font-bold text-2xl md:text-3xl bg-primary text-primary-foreground shadow-md transition-transform duration-300 group-hover:scale-105",
+              isSpeaking ? "animate-pulse ring-4 ring-primary/40" : "",
             )}
           >
             {initials}
           </div>
-          <span className="mt-3 text-sm font-medium text-slate-300/90">{username}</span>
+          <span className="mt-3 text-sm font-medium text-foreground">{username}</span>
         </div>
       )}
 
       {/* Top badges: Hand raise & connection quality */}
       <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
         {isHandRaised ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/90 text-slate-950 text-xs font-semibold backdrop-blur-md shadow-md animate-bounce">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500 text-slate-950 text-xs font-semibold shadow-md animate-bounce">
             <span>✋</span>
             <span>Raised Hand</span>
           </div>
@@ -121,11 +121,11 @@ export function MediasoupVideoTile({
           <div />
         )}
 
-        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-950/60 backdrop-blur-md border border-slate-800/80 text-[11px] text-slate-300">
+        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur border border-border text-[11px] text-muted-foreground shadow-sm">
           <Wifi
             className={cn(
               "w-3 h-3",
-              connectionQuality === "good" ? "text-emerald-400" : connectionQuality === "fair" ? "text-amber-400" : "text-rose-400",
+              connectionQuality === "good" ? "text-emerald-500" : connectionQuality === "fair" ? "text-amber-500" : "text-destructive",
             )}
           />
           <span className="capitalize">{connectionQuality}</span>
@@ -133,24 +133,24 @@ export function MediasoupVideoTile({
       </div>
 
       {/* Bottom overlay: Name & Media indicators */}
-      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-950/70 backdrop-blur-md border border-slate-800/80 text-white shadow-md">
+      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between px-3 py-1.5 rounded-lg bg-background/85 backdrop-blur border border-border text-foreground shadow-md">
         <div className="flex items-center gap-2 truncate">
           <span className="text-xs md:text-sm font-medium truncate">{isLocal ? `${username} (You)` : username}</span>
         </div>
 
-        <div className="flex items-center gap-1.5 text-slate-400">
+        <div className="flex items-center gap-1.5 text-muted-foreground">
           {isAudioEnabled ? (
-            <div className={cn("p-1 rounded-md", isSpeaking ? "text-emerald-400 bg-emerald-950/50" : "")}>
+            <div className={cn("p-1 rounded-md", isSpeaking ? "text-emerald-500 bg-emerald-500/10" : "")}>
               <Mic className="w-3.5 h-3.5" />
             </div>
           ) : (
-            <div className="p-1 rounded-md text-rose-400 bg-rose-950/50">
+            <div className="p-1 rounded-md text-destructive bg-destructive/10">
               <MicOff className="w-3.5 h-3.5" />
             </div>
           )}
 
           {!isVideoEnabled && (
-            <div className="p-1 rounded-md text-rose-400 bg-rose-950/50">
+            <div className="p-1 rounded-md text-destructive bg-destructive/10">
               <VideoOff className="w-3.5 h-3.5" />
             </div>
           )}
