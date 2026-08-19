@@ -37,13 +37,13 @@ COPY --from=dotnet-build /app/backend /app/backend
 COPY supervisord.conf /etc/supervisord.conf
 
 # Expose ports:
-# 5000 (ASP.NET Core REST API & SignalR)
-# 4000 (Mediasoup SFU Socket.io Signaling)
+# 5000 (Unified Gateway: SFU Socket.io + SignalR Hub + REST APIs)
 # 20000-29999/udp (Mediasoup WebRTC Media Traffic)
-EXPOSE 5000 4000 20000-29999/udp
+EXPOSE 5000 20000-29999/udp
 
-ENV ASPNETCORE_URLS="http://+:5000"
-ENV PORT="4000"
+ENV PORT="5000"
+ENV ASPNETCORE_URLS="http://127.0.0.1:5001"
+ENV DOTNET_BACKEND_URL="http://127.0.0.1:5001"
 ENV NODE_ENV="production"
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

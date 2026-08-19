@@ -4,7 +4,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Copy, Check, Maximize, Minimize, Video, ShieldCheck } from "lucide-react"
+import { Copy, Check, Maximize, Minimize, Video } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -26,6 +26,7 @@ export function MeetingHeader({
   isSignalRConnected = true,
 }: MeetingHeaderProps) {
   const [copied, setCopied] = useState(false)
+  const isOnline = isSfuConnected && isSignalRConnected
 
   const copyMeetingLink = () => {
     if (typeof window !== "undefined") {
@@ -77,19 +78,16 @@ export function MeetingHeader({
 
       {/* Right: Status & Actions */}
       <div className="flex items-center gap-2 md:gap-3">
-        {/* Connection Status Badge */}
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-muted border border-border text-xs text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <span
-              className={`w-2 h-2 rounded-full ${isSfuConnected ? "bg-emerald-500 animate-pulse" : "bg-destructive"}`}
-            />
-            <span className="text-[11px] font-medium text-foreground">SFU Router</span>
-          </div>
-          <span className="text-border">|</span>
-          <div className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-            <span className="text-[11px] font-medium text-foreground">SignalR</span>
-          </div>
+        {/* Simple User-Friendly Connection Status Pill */}
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted border border-border text-xs">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isOnline ? "bg-emerald-500 animate-pulse" : "bg-amber-500 animate-pulse"
+            }`}
+          />
+          <span className="text-[11px] font-medium text-foreground">
+            {isOnline ? "Live" : "Connecting..."}
+          </span>
         </div>
 
         {/* Dark/Light Mode Toggle */}

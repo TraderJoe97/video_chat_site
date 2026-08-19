@@ -7,26 +7,47 @@ import { createProxyMiddleware } from "http-proxy-middleware"
 import { config } from "./config.mjs"
 
 const app = express()
-app.use(cors())
+
+// 1. Enable Full CORS with Credentials (reflects request origin for SignalR & REST)
+app.use(
+  cors({
+    origin: (origin, callback) => callback(null, true),
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-signalr-user-agent"],
+  })
+)
 
 const DOTNET_URL = process.env.DOTNET_BACKEND_URL || "http://127.0.0.1:5001"
 
-// 1. Proxy SignalR Hub to .NET backend
-const signalrProxy = createProxyMiddleware({
+// 2. Proxy SignalR Hub and .NET REST APIs (Mounted without path stripping)
+const dotnetProxy = createProxyMiddleware({
   target: DOTNET_URL,
   changeOrigin: true,
   ws: true,
-  logger: console,
+  on: {
+    proxyReq: (proxyReq, req, res) => {
+      // Forward client origin to backend
+      if (req.headers.origin) {
+        proxyReq.setHeader("origin", req.headers.origin)
+      }
+    },
+    error: (err, req, res) => {
+      console.warn(`[Proxy Error] ${req.method} ${req.url} -> ${err.message}`)
+      if (res && !res.headersSent && typeof res.status === "function") {
+        res.status(502).json({ error: "Backend service temporarily unavailable", details: err.message })
+      }
+    },
+  },
 })
-app.use("/hubs", signalrProxy)
 
-// 2. Proxy .NET REST APIs
-const apiProxy = createProxyMiddleware({
-  target: DOTNET_URL,
-  changeOrigin: true,
-  logger: console,
+// Route both /hubs and /api/meetings through the proxy
+app.use((req, res, next) => {
+  if (req.url.startsWith("/hubs") || req.url.startsWith("/api/meetings")) {
+    return dotnetProxy(req, res, next)
+  }
+  next()
 })
-app.use("/api/meetings", apiProxy)
 
 // 3. Unified Health Check Endpoint for Cloud Deployments
 app.get("/api/health", async (req, res) => {
@@ -52,13 +73,14 @@ const httpServer = http.createServer(app)
 // Handle WebSocket upgrade for SignalR Hub
 httpServer.on("upgrade", (req, socket, head) => {
   if (req.url && req.url.startsWith("/hubs")) {
-    signalrProxy.upgrade(req, socket, head)
+    dotnetProxy.upgrade(req, socket, head)
   }
 })
 
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: true,
+    credentials: true,
     methods: ["GET", "POST"],
   },
   transports: ["websocket", "polling"],
