@@ -11,22 +11,34 @@ RUN dotnet restore --disable-parallel
 COPY backend/ .
 RUN dotnet publish -c Release -o /app/backend -m:1 --no-restore
 
-# --- Stage 2: Build Mediasoup SFU (Sequential dependency on Stage 1 to prevent memory contention) ---
+# --- Stage 2: Build Mediasoup SFU (Single-thread build, python-is-python3 + pip) ---
 FROM node:22-bookworm-slim AS sfu-build
 WORKDIR /src/sfu
 ENV MEDIASOUP_BUILD_WORKER_CONCURRENT_NUMBER=1
 ENV npm_config_jobs=1
+
+# Install python3, pip, python-is-python3 (creates /usr/bin/python symlink), and build-essential
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python-is-python3 \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # Force Docker BuildKit to wait for dotnet-build to finish before starting sfu-build
 COPY --from=dotnet-build /app/backend/Backend.dll /tmp/stage1-barrier
 COPY sfu/package.json sfu/package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund --loglevel=error
+RUN npm install --omit=dev --no-audit --no-fund
 COPY sfu/ .
 
 # --- Stage 3: Minimal Unified Runtime Image ---
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS runtime
 WORKDIR /app
 
-# Install Node.js 22 & Supervisor sequentially
+# Force Docker BuildKit to wait for sfu-build before doing runtime package install
+COPY --from=sfu-build /src/sfu/package.json /tmp/stage2-barrier
+
+# Install Node.js 22 & Supervisor
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     supervisor \
