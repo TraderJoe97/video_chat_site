@@ -16,9 +16,15 @@ public class SupabaseService
 
     public SupabaseService(IConfiguration configuration, ILogger<SupabaseService> logger)
     {
-        _logger = logger;
         _supabaseUrl = configuration["SUPABASE_URL"] ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
-        _supabaseKey = configuration["SUPABASE_KEY"] ?? configuration["SUPABASE_ANON_KEY"] ?? Environment.GetEnvironmentVariable("SUPABASE_KEY") ?? Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY");
+        _supabaseKey = configuration["SUPABASE_SECRET_KEY"]
+            ?? configuration["SUPABASE_KEY"]
+            ?? configuration["SUPABASE_PUBLISHABLE_KEY"]
+            ?? configuration["SUPABASE_ANON_KEY"]
+            ?? Environment.GetEnvironmentVariable("SUPABASE_SECRET_KEY")
+            ?? Environment.GetEnvironmentVariable("SUPABASE_KEY")
+            ?? Environment.GetEnvironmentVariable("SUPABASE_PUBLISHABLE_KEY")
+            ?? Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY");
 
         _isConfigured = !string.IsNullOrWhiteSpace(_supabaseUrl) && !string.IsNullOrWhiteSpace(_supabaseKey);
 
