@@ -37,16 +37,19 @@ export function useMediasoup({
 }: UseMediasoupProps) {
   const [isSfuConnected, setIsSfuConnected] = useState(false)
   const [remoteStreams, setRemoteStreams] = useState<Map<string, RemoteParticipantStream>>(new Map())
-  
+
   const socketRef = useRef<Socket | null>(null)
   const deviceRef = useRef<Device | null>(null)
   const sendTransportRef = useRef<Transport | null>(null)
   const recvTransportRef = useRef<Transport | null>(null)
-  
+
   const audioProducerRef = useRef<Producer | null>(null)
   const videoProducerRef = useRef<Producer | null>(null)
   const consumersRef = useRef<Map<string, Consumer>>(new Map())
+  const localStreamRef = useRef<MediaStream | null>(null)
   const isMountedRef = useRef(true)
+
+  localStreamRef.current = localStream
 
   useEffect(() => {
     isMountedRef.current = true
@@ -55,12 +58,14 @@ export function useMediasoup({
     }
   }, [])
 
-  // 1. Initialize SFU Connection & Device
+  // 1. Initialize SFU Connection & Device (Independent of localStream to prevent reconnects)
   useEffect(() => {
     if (!meetingId || !userId) return
 
-    console.log(`[Mediasoup] Connecting to SFU at ${sfuUrl}`)
-    const socket = io(sfuUrl, {
+    const normalizedSfuUrl = sfuUrl.replace(/\/$/, "")
+    console.log(`[Mediasoup] Connecting to SFU at ${normalizedSfuUrl}`)
+
+    const socket = io(normalizedSfuUrl, {
       transports: ["websocket", "polling"],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
@@ -74,11 +79,11 @@ export function useMediasoup({
 
       // Join SFU room & get router RTP capabilities
       socket.emit(
-        "join-sfu-room",
+        "join-room",
         { meetingId, userId, username: username || userId },
         async (data: { rtpCapabilities?: RtpCapabilities; error?: string }) => {
-          if (data.error || !data.rtpCapabilities) {
-            console.error("[Mediasoup] Failed to join SFU room:", data.error)
+          if (data?.error || !data?.rtpCapabilities) {
+            console.error("[Mediasoup] Failed to join SFU room:", data?.error)
             return
           }
 
@@ -92,6 +97,22 @@ export function useMediasoup({
             // Create WebRTC Transports
             await initSendTransport(socket, device)
             await initRecvTransport(socket, device)
+
+            // Publish local tracks if stream is already available
+            if (localStreamRef.current) {
+              await publishTracks(localStreamRef.current)
+            }
+
+            // Fetch any existing producers in the room
+            socket.emit("get-producers", async (producers: Array<{ producerId: string; producerUserId: string; producerUsername: string; kind: string; appData: any }>) => {
+              if (Array.isArray(producers)) {
+                for (const prod of producers) {
+                  if (prod.producerUserId !== userId) {
+                    await consumeProducer(socket, prod)
+                  }
+                }
+              }
+            })
           } catch (err: any) {
             console.error("[Mediasoup] Error initializing device or transports:", err)
           }
@@ -110,20 +131,17 @@ export function useMediasoup({
       await consumeProducer(socket, producerData)
     })
 
-    // Listen for existing producers when joining
-    socket.on("existing-producers", async (producers: Array<{ producerId: string; producerUserId: string; producerUsername: string; kind: string; appData: any }>) => {
-      console.log(`[Mediasoup] Consuming ${producers.length} existing producers in meeting`)
-      for (const prod of producers) {
-        await consumeProducer(socket, prod)
-      }
+    // Remote peer left
+    socket.on("peer-left", ({ userId: leftUserId }: { userId: string }) => {
+      console.log(`[Mediasoup] Peer left: ${leftUserId}`)
+      setRemoteStreams((prev) => {
+        const next = new Map(prev)
+        next.delete(leftUserId)
+        return next
+      })
     })
 
-    // Remote producer closed
-    socket.on("producer-closed", ({ producerId, userId: remoteUserId }: { producerId: string; userId: string }) => {
-      console.log(`[Mediasoup] Remote producer closed: ${producerId} for user ${remoteUserId}`)
-      handleConsumerClose(producerId, remoteUserId)
-    })
-
+    // Producer closed
     socket.on("consumer-closed", ({ consumerId, producerId }: { consumerId: string; producerId: string }) => {
       const consumer = consumersRef.current.get(consumerId)
       if (consumer) {
@@ -132,19 +150,42 @@ export function useMediasoup({
       }
     })
 
+    // Producer paused/resumed
+    socket.on("producer-paused", ({ producerId }: { producerId: string }) => {
+      setRemoteStreams((prev) => {
+        const next = new Map(prev)
+        for (const [rUserId, rStream] of next.entries()) {
+          if (rStream.audioConsumer?.producerId === producerId) {
+            next.set(rUserId, { ...rStream, isAudioEnabled: false })
+          } else if (rStream.videoConsumer?.producerId === producerId) {
+            next.set(rUserId, { ...rStream, isVideoEnabled: false })
+          }
+        }
+        return next
+      })
+    })
+
+    socket.on("producer-resumed", ({ producerId }: { producerId: string }) => {
+      setRemoteStreams((prev) => {
+        const next = new Map(prev)
+        for (const [rUserId, rStream] of next.entries()) {
+          if (rStream.audioConsumer?.producerId === producerId) {
+            next.set(rUserId, { ...rStream, isAudioEnabled: true })
+          } else if (rStream.videoConsumer?.producerId === producerId) {
+            next.set(rUserId, { ...rStream, isVideoEnabled: true })
+          }
+        }
+        return next
+      })
+    })
+
+    // Cleanup on unmount
     return () => {
-      console.log("[Mediasoup] Cleaning up SFU resources")
       if (audioProducerRef.current) audioProducerRef.current.close()
       if (videoProducerRef.current) videoProducerRef.current.close()
       if (sendTransportRef.current) sendTransportRef.current.close()
       if (recvTransportRef.current) recvTransportRef.current.close()
-
-      consumersRef.current.forEach((c) => c.close())
-      consumersRef.current.clear()
-
       socket.disconnect()
-      socketRef.current = null
-      deviceRef.current = null
     }
   }, [meetingId, userId, username, sfuUrl])
 
@@ -152,7 +193,7 @@ export function useMediasoup({
   const initSendTransport = async (socket: Socket, device: Device) => {
     return new Promise<void>((resolve, reject) => {
       socket.emit("create-transport", { direction: "send" }, async (params: any) => {
-        if (params.error) {
+        if (params?.error) {
           return reject(params.error)
         }
 
@@ -162,14 +203,14 @@ export function useMediasoup({
 
           transport.on("connect", ({ dtlsParameters }, callback, errback) => {
             socket.emit("connect-transport", { transportId: transport.id, dtlsParameters }, (res: any) => {
-              if (res.error) errback(new Error(res.error))
+              if (res?.error) errback(new Error(res.error))
               else callback()
             })
           })
 
           transport.on("produce", ({ kind, rtpParameters, appData }, callback, errback) => {
             socket.emit("produce", { transportId: transport.id, kind, rtpParameters, appData }, (res: any) => {
-              if (res.error) errback(new Error(res.error))
+              if (res?.error) errback(new Error(res.error))
               else callback({ id: res.id })
             })
           })
@@ -187,7 +228,7 @@ export function useMediasoup({
   const initRecvTransport = async (socket: Socket, device: Device) => {
     return new Promise<void>((resolve, reject) => {
       socket.emit("create-transport", { direction: "recv" }, async (params: any) => {
-        if (params.error) {
+        if (params?.error) {
           return reject(params.error)
         }
 
@@ -197,7 +238,7 @@ export function useMediasoup({
 
           transport.on("connect", ({ dtlsParameters }, callback, errback) => {
             socket.emit("connect-transport", { transportId: transport.id, dtlsParameters }, (res: any) => {
-              if (res.error) errback(new Error(res.error))
+              if (res?.error) errback(new Error(res.error))
               else callback()
             })
           })
@@ -214,7 +255,7 @@ export function useMediasoup({
   // Helper: Consume a remote producer
   const consumeProducer = async (
     socket: Socket,
-    producerData: { producerId: string; producerUserId: string; producerUsername: string; kind: string; appData: any },
+    producerData: { producerId: string; producerUserId: string; producerUsername: string; kind: string; appData?: any },
   ) => {
     const device = deviceRef.current
     const recvTransport = recvTransportRef.current
@@ -235,7 +276,7 @@ export function useMediasoup({
         rtpCapabilities: device.rtpCapabilities,
       },
       async (params: any) => {
-        if (params.error) {
+        if (params?.error) {
           console.error("[Mediasoup] Error consuming remote producer:", params.error)
           return
         }
@@ -258,152 +299,116 @@ export function useMediasoup({
 
           // Add track to participant's MediaStream
           const remoteUserId = producerData.producerUserId
-          const remoteUsername = producerData.producerUsername || remoteUserId
-
           setRemoteStreams((prev) => {
             const next = new Map(prev)
-            let participant = next.get(remoteUserId)
-
-            if (!participant) {
-              const newStream = new MediaStream()
-              newStream.addTrack(consumer.track)
-              participant = {
-                userId: remoteUserId,
-                username: remoteUsername,
-                stream: newStream,
-                audioConsumer: consumer.kind === "audio" ? consumer : undefined,
-                videoConsumer: consumer.kind === "video" ? consumer : undefined,
-                isAudioEnabled: consumer.kind === "audio" ? true : false,
-                isVideoEnabled: consumer.kind === "video" ? true : false,
-              }
-            } else {
-              participant.stream.addTrack(consumer.track)
-              if (consumer.kind === "audio") {
-                participant.audioConsumer = consumer
-                participant.isAudioEnabled = true
-              }
-              if (consumer.kind === "video") {
-                participant.videoConsumer = consumer
-                participant.isVideoEnabled = true
-              }
+            const existing = next.get(remoteUserId) || {
+              userId: remoteUserId,
+              username: producerData.producerUsername || remoteUserId,
+              stream: new MediaStream(),
+              isAudioEnabled: true,
+              isVideoEnabled: true,
             }
 
-            next.set(remoteUserId, { ...participant })
+            // Replace or add track
+            if (consumer.kind === "video") {
+              const currentVideoTrack = existing.stream.getVideoTracks()[0]
+              if (currentVideoTrack) existing.stream.removeTrack(currentVideoTrack)
+              existing.stream.addTrack(consumer.track)
+              existing.videoConsumer = consumer
+            } else if (consumer.kind === "audio") {
+              const currentAudioTrack = existing.stream.getAudioTracks()[0]
+              if (currentAudioTrack) existing.stream.removeTrack(currentAudioTrack)
+              existing.stream.addTrack(consumer.track)
+              existing.audioConsumer = consumer
+            }
+
+            next.set(remoteUserId, existing)
             return next
           })
         } catch (err: any) {
-          console.error("[Mediasoup] Exception creating client consumer:", err)
+          console.error("[Mediasoup] Failed to consume track on transport:", err)
         }
       },
     )
   }
 
-  // Helper: Handle remote consumer cleanup
-  const handleConsumerClose = (producerId: string, remoteUserId: string) => {
-    setRemoteStreams((prev) => {
-      const next = new Map(prev)
-      const participant = next.get(remoteUserId)
-      if (participant) {
-        if (participant.videoConsumer?.producerId === producerId) {
-          participant.stream.getVideoTracks().forEach((t) => participant.stream.removeTrack(t))
-          participant.videoConsumer = undefined
-          participant.isVideoEnabled = false
-        }
-        if (participant.audioConsumer?.producerId === producerId) {
-          participant.stream.getAudioTracks().forEach((t) => participant.stream.removeTrack(t))
-          participant.audioConsumer = undefined
-          participant.isAudioEnabled = false
-        }
+  // 2. Publish Tracks when localStream or sendTransport becomes available
+  const publishTracks = async (stream: MediaStream) => {
+    const transport = sendTransportRef.current
+    if (!transport) return
 
-        if (!participant.videoConsumer && !participant.audioConsumer) {
-          next.delete(remoteUserId)
-        } else {
-          next.set(remoteUserId, { ...participant })
-        }
+    try {
+      const audioTrack = stream.getAudioTracks()[0]
+      const videoTrack = stream.getVideoTracks()[0]
+
+      if (audioTrack && !audioProducerRef.current) {
+        const audioProducer = await transport.produce({
+          track: audioTrack,
+          codecOptions: {
+            opusStereo: true,
+            opusDtx: true,
+          },
+          appData: { mediaType: "audio" },
+        })
+        audioProducerRef.current = audioProducer
+        console.log("[Mediasoup] Audio producer created successfully:", audioProducer.id)
       }
-      return next
-    })
+
+      if (videoTrack && !videoProducerRef.current) {
+        const videoProducer = await transport.produce({
+          track: videoTrack,
+          encodings: [
+            { maxBitrate: 100000, scaleResolutionDownBy: 4 },
+            { maxBitrate: 300000, scaleResolutionDownBy: 2 },
+            { maxBitrate: 900000 },
+          ],
+          codecOptions: {
+            videoGoogleStartBitrate: 1000,
+          },
+          appData: { mediaType: "video" },
+        })
+        videoProducerRef.current = videoProducer
+        console.log("[Mediasoup] Video producer created successfully:", videoProducer.id)
+      }
+    } catch (err) {
+      console.error("[Mediasoup] Error publishing local tracks:", err)
+    }
   }
 
-  // 2. Publish Local Media Streams ($O(1)$ to SFU)
-  const publishLocalMedia = useCallback(
-    async (stream: MediaStream) => {
-      const sendTransport = sendTransportRef.current
-      if (!sendTransport || sendTransport.closed) {
-        console.warn("[Mediasoup] Send transport not ready to publish media")
-        return
-      }
-
-      // Publish Audio Track
-      const audioTrack = stream.getAudioTracks()[0]
-      if (audioTrack && (!audioProducerRef.current || audioProducerRef.current.closed)) {
-        try {
-          console.log("[Mediasoup] Publishing local audio track...")
-          const audioProducer = await sendTransport.produce({
-            track: audioTrack,
-            codecOptions: {
-              opusStereo: true,
-              opusDtx: true,
-            },
-          })
-          audioProducerRef.current = audioProducer
-        } catch (err: any) {
-          console.error("[Mediasoup] Error producing audio:", err)
-        }
-      }
-
-      // Publish Video Track
-      const videoTrack = stream.getVideoTracks()[0]
-      if (videoTrack && (!videoProducerRef.current || videoProducerRef.current.closed)) {
-        try {
-          console.log("[Mediasoup] Publishing local video track...")
-          const videoProducer = await sendTransport.produce({
-            track: videoTrack,
-            encodings: [
-              { maxBitrate: 100000, scaleResolutionDownBy: 4 },
-              { maxBitrate: 300000, scaleResolutionDownBy: 2 },
-              { maxBitrate: 900000, scaleResolutionDownBy: 1 },
-            ],
-            codecOptions: {
-              videoGoogleStartBitrate: 1000,
-            },
-          })
-          videoProducerRef.current = videoProducer
-        } catch (err: any) {
-          console.error("[Mediasoup] Error producing video:", err)
-        }
-      }
-    },
-    [],
-  )
-
-  // Toggle Audio Mute
-  const setAudioMuted = useCallback((muted: boolean) => {
-    if (audioProducerRef.current) {
-      if (muted) audioProducerRef.current.pause()
-      else audioProducerRef.current.resume()
-    }
-  }, [])
-
-  // Toggle Video Mute
-  const setVideoMuted = useCallback((muted: boolean) => {
-    if (videoProducerRef.current) {
-      if (muted) videoProducerRef.current.pause()
-      else videoProducerRef.current.resume()
-    }
-  }, [])
-
-  // Automatically publish when localStream or sendTransport becomes available
   useEffect(() => {
-    if (localStream && isSfuConnected && sendTransportRef.current) {
-      publishLocalMedia(localStream)
+    if (localStream && sendTransportRef.current) {
+      publishTracks(localStream)
     }
-  }, [localStream, isSfuConnected, publishLocalMedia])
+  }, [localStream])
+
+  // Public Methods for Media Controls
+  const setAudioMuted = useCallback((muted: boolean) => {
+    if (audioProducerRef.current && socketRef.current) {
+      if (muted) {
+        audioProducerRef.current.pause()
+        socketRef.current.emit("pause-producer", { producerId: audioProducerRef.current.id })
+      } else {
+        audioProducerRef.current.resume()
+        socketRef.current.emit("resume-producer", { producerId: audioProducerRef.current.id })
+      }
+    }
+  }, [])
+
+  const setVideoMuted = useCallback((muted: boolean) => {
+    if (videoProducerRef.current && socketRef.current) {
+      if (muted) {
+        videoProducerRef.current.pause()
+        socketRef.current.emit("pause-producer", { producerId: videoProducerRef.current.id })
+      } else {
+        videoProducerRef.current.resume()
+        socketRef.current.emit("resume-producer", { producerId: videoProducerRef.current.id })
+      }
+    }
+  }, [])
 
   return {
     isSfuConnected,
     remoteStreams,
-    publishLocalMedia,
     setAudioMuted,
     setVideoMuted,
   }

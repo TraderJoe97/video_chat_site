@@ -6,14 +6,14 @@ import * as signalR from "@microsoft/signalr"
 export interface SignalRParticipant {
   userId: string
   username: string
-  isAudioEnabled?: boolean
-  isVideoEnabled?: boolean
-  isHandRaised?: boolean
-  joinedAt?: string
+  isAudioEnabled: boolean
+  isVideoEnabled: boolean
+  isHandRaised: boolean
+  joinedAt: string
 }
 
 export interface SignalRMessage {
-  id: string
+  id?: string
   senderId: string
   senderName: string
   content: string
@@ -60,13 +60,25 @@ export function useSignalR({
         skipNegotiation: false,
         transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.LongPolling,
       })
-      .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+      .withAutomaticReconnect([0, 2000, 5000, 10000, 20000])
       .configureLogging(signalR.LogLevel.Warning)
       .build()
 
     connectionRef.current = connection
 
     // Event Handlers
+    const handleJoined = (meeting: any, currentParticipants: SignalRParticipant[], chatHistory: any[]) => {
+      console.log(`[SignalR] Successfully joined meeting ${meeting?.meetingId || meetingId}`)
+      if (currentParticipants && Array.isArray(currentParticipants)) {
+        currentParticipants.forEach((p) => {
+          if (p.userId !== userId) onUserJoined?.(p)
+        })
+      }
+    }
+
+    connection.on("JoinedMeeting", handleJoined)
+    connection.on("joinedmeeting", handleJoined)
+
     connection.on("UserJoined", (participant: SignalRParticipant) => {
       console.log(`[SignalR] User joined: ${participant.username} (${participant.userId})`)
       onUserJoined?.(participant)
@@ -108,65 +120,58 @@ export function useSignalR({
       } catch (err: any) {
         console.warn("[SignalR] Connection error (will retry):", err.message)
         setConnectionError(err.message)
-        setIsConnected(false)
       }
     }
 
     startConnection()
 
+    // Cleanup on unmount
     return () => {
-      console.log("[SignalR] Cleaning up connection")
       if (connection.state === signalR.HubConnectionState.Connected) {
         connection.invoke("LeaveMeeting", meetingId, userId).catch(() => {})
+        connection.stop()
       }
-      connection.stop().catch(() => {})
-      connectionRef.current = null
-      setIsConnected(false)
     }
-  }, [meetingId, userId, username, backendUrl])
+  }, [meetingId, userId, username, backendUrl, onUserJoined, onUserLeft, onReceiveMessage, onHandRaised, onMediaStatusChanged])
 
+  // Public Methods
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!connectionRef.current || connectionRef.current.state !== signalR.HubConnectionState.Connected) {
+      if (!connectionRef.current || !isConnected) {
         console.warn("[SignalR] Cannot send message: Not connected")
-        return false
+        return
       }
-
       try {
-        await connectionRef.current.invoke("SendMessage", meetingId, userId, username || userId, content)
-        return true
-      } catch (err: any) {
+        await connectionRef.current.invoke("SendMessage", meetingId, userId, username || "User", content)
+      } catch (err) {
         console.error("[SignalR] Error sending message:", err)
-        return false
       }
     },
-    [meetingId, userId, username],
+    [meetingId, userId, username, isConnected],
   )
 
   const raiseHand = useCallback(
     async (isRaised: boolean) => {
-      if (!connectionRef.current || connectionRef.current.state !== signalR.HubConnectionState.Connected) return
-
+      if (!connectionRef.current || !isConnected) return
       try {
         await connectionRef.current.invoke("RaiseHand", meetingId, userId, isRaised)
-      } catch (err: any) {
+      } catch (err) {
         console.error("[SignalR] Error raising hand:", err)
       }
     },
-    [meetingId, userId],
+    [meetingId, userId, isConnected],
   )
 
   const toggleMediaStatus = useCallback(
     async (isAudioEnabled: boolean, isVideoEnabled: boolean) => {
-      if (!connectionRef.current || connectionRef.current.state !== signalR.HubConnectionState.Connected) return
-
+      if (!connectionRef.current || !isConnected) return
       try {
         await connectionRef.current.invoke("ToggleMediaStatus", meetingId, userId, isAudioEnabled, isVideoEnabled)
-      } catch (err: any) {
+      } catch (err) {
         console.error("[SignalR] Error toggling media status:", err)
       }
     },
-    [meetingId, userId],
+    [meetingId, userId, isConnected],
   )
 
   return {
