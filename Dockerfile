@@ -1,23 +1,27 @@
-# Unified Production Dockerfile: .NET Backend + Mediasoup SFU (Debian Bookworm)
+# Unified Production Dockerfile: .NET Backend + Mediasoup SFU (Low Memory Build)
 
-# --- Stage 1: Build .NET Backend ---
+# --- Stage 1: Build .NET Backend (Single Process Concurrency) ---
 FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS dotnet-build
 WORKDIR /src/backend
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 COPY backend/Backend.csproj .
-RUN dotnet restore
+RUN dotnet restore --disable-parallel
 COPY backend/ .
-RUN dotnet publish -c Release -o /app/backend
+RUN dotnet publish -c Release -o /app/backend -m:1 --no-restore
 
-# --- Stage 2: Build Mediasoup SFU ---
+# --- Stage 2: Build Mediasoup SFU (Constrained Concurrency) ---
 FROM node:22-bookworm-slim AS sfu-build
 WORKDIR /src/sfu
+ENV MEDIASOUP_BUILD_WORKER_CONCURRENT_NUMBER=1
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 COPY sfu/package.json .
-RUN npm install --omit=dev
+RUN npm install --omit=dev --no-audit --no-fund
 COPY sfu/ .
 
 # --- Stage 3: Final Unified Runtime Image ---
