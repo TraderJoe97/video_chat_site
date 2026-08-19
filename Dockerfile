@@ -1,7 +1,7 @@
-# Unified Production Dockerfile: .NET 10 Backend + Mediasoup SFU (Debian glibc for prebuilt Mediasoup binary)
+# Unified Production Dockerfile: .NET Backend + Mediasoup SFU (Debian Bookworm)
 
 # --- Stage 1: Build .NET Backend ---
-FROM mcr.microsoft.com/dotnet/sdk:10.0-preview-bookworm-slim AS dotnet-build
+FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS dotnet-build
 WORKDIR /src/backend
 COPY backend/Backend.csproj .
 RUN dotnet restore
@@ -21,7 +21,7 @@ RUN npm install --omit=dev
 COPY sfu/ .
 
 # --- Stage 3: Final Unified Runtime Image ---
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview-bookworm-slim AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS runtime
 WORKDIR /app
 
 # Install Node.js 22 & Supervisor
