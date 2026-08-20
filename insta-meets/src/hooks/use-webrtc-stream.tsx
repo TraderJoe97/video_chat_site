@@ -17,6 +17,7 @@ interface PeerState {
   ignoreOffer: boolean
   isPolite: boolean
   pendingCandidates: RTCIceCandidateInit[]
+  cameraSender?: RTCRtpSender
   screenSender?: RTCRtpSender
 }
 
@@ -93,7 +94,10 @@ export function useWebRTCStream({
       // 1. Add Local Camera/Audio Tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
-          pc.addTrack(track, localStreamRef.current!)
+          const sender = pc.addTrack(track, localStreamRef.current!)
+          if (track.kind === "video") {
+            peerState.cameraSender = sender
+          }
           console.log(`[WebRTC] Added local track (${track.kind}) to peer ${peerUserId}`)
         })
       }
@@ -102,9 +106,12 @@ export function useWebRTCStream({
       if (localScreenStreamRef.current) {
         const screenTrack = localScreenStreamRef.current.getVideoTracks()[0]
         if (screenTrack) {
+          if ("contentHint" in screenTrack) {
+            screenTrack.contentHint = "detail"
+          }
           const sender = pc.addTrack(screenTrack, localScreenStreamRef.current)
           peerState.screenSender = sender
-          console.log(`[WebRTC] Added screen share track to peer ${peerUserId}`)
+          console.log(`[WebRTC] Added persistent screen share track to peer ${peerUserId}`)
         }
       }
 
@@ -146,7 +153,7 @@ export function useWebRTCStream({
           const next = new Map(prev)
           const existingRemote = next.get(peerUserId)
 
-          // If this is a secondary video track (e.g. screen share), handle separately
+          // If this is a secondary video track (e.g. screen share), store separately
           if (track.kind === "video" && existingRemote?.stream.getVideoTracks().length && existingRemote.stream.getVideoTracks()[0].id !== track.id) {
             console.log(`[WebRTC] Identified secondary video stream (screen share) from ${peerUserId}`)
             setRemoteScreenStreams((sPrev) => {
@@ -305,12 +312,20 @@ export function useWebRTCStream({
 
   // Start Screen Sharing as a dedicated track (Preserving Camera!)
   const addScreenTrack = useCallback(async (screenTrack: MediaStreamTrack, screenStream: MediaStream) => {
+    if ("contentHint" in screenTrack) {
+      screenTrack.contentHint = "detail"
+    }
     localScreenStreamRef.current = screenStream
+
     for (const [peerUserId, peer] of peersRef.current.entries()) {
       try {
-        const sender = peer.pc.addTrack(screenTrack, screenStream)
-        peer.screenSender = sender
-        console.log(`[WebRTC] Added screen track to peer ${peerUserId}`)
+        if (!peer.screenSender) {
+          const sender = peer.pc.addTrack(screenTrack, screenStream)
+          peer.screenSender = sender
+          console.log(`[WebRTC] Added persistent screen track to peer ${peerUserId}`)
+        } else {
+          await peer.screenSender.replaceTrack(screenTrack)
+        }
       } catch (err) {
         console.error(`[WebRTC] Error adding screen track to peer ${peerUserId}:`, err)
       }
@@ -340,11 +355,17 @@ export function useWebRTCStream({
     peersRef.current.forEach((peer) => {
       const senders = peer.pc.getSenders()
       localStream.getTracks().forEach((track) => {
-        const sender = senders.find((s) => s.track?.kind === track.kind && s !== peer.screenSender)
-        if (sender) {
-          sender.replaceTrack(track)
+        // Match camera/audio sender specifically and NEVER overwrite screen sender
+        if (track.kind === "video" && peer.cameraSender) {
+          peer.cameraSender.replaceTrack(track).catch(() => {})
         } else {
-          peer.pc.addTrack(track, localStream)
+          const sender = senders.find((s) => s.track?.kind === track.kind && s !== peer.screenSender)
+          if (sender) {
+            sender.replaceTrack(track).catch(() => {})
+          } else {
+            const newSender = peer.pc.addTrack(track, localStream)
+            if (track.kind === "video") peer.cameraSender = newSender
+          }
         }
       })
     })

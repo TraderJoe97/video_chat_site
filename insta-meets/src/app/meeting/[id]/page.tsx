@@ -206,9 +206,11 @@ export default function MeetingPage() {
     toast.info("Whiteboard was cleared by a participant")
   }, [])
 
+  // Informative toast without forcing other participants' views
   const handleWhiteboardToggled = useCallback((isOpen: boolean) => {
-    setIsWhiteboardOpen(isOpen)
-    toast.info(isOpen ? "Whiteboard mode opened" : "Whiteboard mode closed")
+    if (isOpen) {
+      toast.info("Whiteboard is being edited by a participant. Click Whiteboard to view.")
+    }
   }, [])
 
   const handleReceiveWhiteboardHistory = useCallback((history: any[]) => {
@@ -222,7 +224,6 @@ export default function MeetingPage() {
     stopScreenShare,
     sendWhiteboardStroke,
     clearWhiteboard,
-    toggleWhiteboardMode: signalRToggleWhiteboard,
     requestWhiteboardHistory,
     sendMessage,
     sendSignal,
@@ -326,12 +327,19 @@ export default function MeetingPage() {
 
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: { cursor: "always" } as any,
+          video: {
+            cursor: "always",
+            frameRate: { ideal: 30, max: 60 },
+          } as any,
           audio: false,
         })
 
         screenStreamRef.current = screenStream
         const screenTrack = screenStream.getVideoTracks()[0]
+
+        if ("contentHint" in screenTrack) {
+          screenTrack.contentHint = "detail"
+        }
 
         screenTrack.onended = () => {
           stopLocalScreenShare()
@@ -349,12 +357,15 @@ export default function MeetingPage() {
     }
   }
 
+  // Individual toggle: each user decides when their own whiteboard is open
   const toggleWhiteboard = () => {
     const nextState = !isWhiteboardOpen
     setIsWhiteboardOpen(nextState)
-    signalRToggleWhiteboard(nextState)
     if (nextState) {
       requestWhiteboardHistory()
+      toast.info("Whiteboard opened")
+    } else {
+      toast.info("Whiteboard closed")
     }
   }
 
