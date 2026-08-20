@@ -1,10 +1,23 @@
 "use client"
 
 import React, { useCallback, useEffect, useRef } from "react"
-import { Tldraw, Editor, TLRecord, loadSnapshot } from "tldraw"
-import "tldraw/tldraw.css"
+import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { X } from "lucide-react"
+
+// Dynamically import Excalidraw for client-only rendering
+const Excalidraw = dynamic(
+  () => import("@excalidraw/excalidraw").then((mod) => mod.Excalidraw),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex flex-col items-center justify-center h-full w-full bg-slate-950 text-muted-foreground">
+        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-primary mb-3" />
+        <span className="text-sm font-medium">Loading Collaborative Whiteboard...</span>
+      </div>
+    ),
+  }
+)
 
 export interface WhiteboardElement {
   id?: string
@@ -34,104 +47,70 @@ export function Whiteboard({
   incomingHistory,
   isBoardCleared,
 }: WhiteboardProps) {
-  const editorRef = useRef<Editor | null>(null)
+  const excalidrawApiRef = useRef<any>(null)
   const isApplyingRemoteRef = useRef(false)
+  const lastSendTimestampRef = useRef<number>(0)
 
-  // Configure editor on mount
-  const handleMount = useCallback(
-    (editor: Editor) => {
-      editorRef.current = editor
+  // 1. Send Local Drawing Changes to SignalR (Debounced for network efficiency)
+  const handleChange = useCallback(
+    (elements: readonly any[], appState: any) => {
+      if (isApplyingRemoteRef.current) return
 
-      // Set user presence (name & color)
-      editor.user.updateUserPreferences({
-        name: currentUsername || "Participant",
-        color: "#3B82F6",
+      const now = Date.now()
+      if (now - lastSendTimestampRef.current < 50) return // ~20fps smooth sync
+      lastSendTimestampRef.current = now
+
+      onSendStroke({
+        type: "excalidraw_elements",
+        senderId: currentUserId,
+        payload: elements,
       })
-
-      // Load initial history if provided
-      if (incomingHistory && Array.isArray(incomingHistory) && incomingHistory.length > 0) {
-        const lastSnapshot = incomingHistory[incomingHistory.length - 1]
-        if (lastSnapshot) {
-          isApplyingRemoteRef.current = true
-          try {
-            if (lastSnapshot.store || lastSnapshot.schema) {
-              loadSnapshot(editor.store, lastSnapshot)
-            } else if (lastSnapshot.records) {
-              editor.store.put(Object.values(lastSnapshot.records) as TLRecord[])
-            }
-          } catch (err) {
-            console.warn("[tldraw] Error loading initial snapshot:", err)
-          } finally {
-            isApplyingRemoteRef.current = false
-          }
-        }
-      }
-
-      // Listen for local changes and broadcast to SignalR
-      const cleanup = editor.store.listen(
-        (entry) => {
-          if (isApplyingRemoteRef.current) return
-
-          const added = Object.values(entry.changes.added)
-          const updated = Object.values(entry.changes.updated).map(([, to]) => to)
-          const removed = Object.values(entry.changes.removed).map((record) => record.id)
-
-          if (added.length > 0 || updated.length > 0 || removed.length > 0) {
-            onSendStroke({
-              type: "tldraw_changes",
-              senderId: currentUserId,
-              payload: { added, updated, removed },
-            })
-          }
-        },
-        { source: "user", scope: "document" }
-      )
-
-      return () => {
-        cleanup()
-      }
     },
-    [currentUserId, currentUsername, incomingHistory, onSendStroke]
+    [currentUserId, onSendStroke]
   )
 
-  // Ingest incoming remote changes from SignalR
+  // 2. Ingest Incoming Remote Drawing Elements from SignalR
   useEffect(() => {
-    if (!incomingStroke || !editorRef.current) return
+    if (!incomingStroke || !excalidrawApiRef.current) return
     if (incomingStroke.senderId === currentUserId) return
 
-    if (incomingStroke.type === "tldraw_changes" && incomingStroke.payload) {
-      const editor = editorRef.current
-      const { added, updated, removed } = incomingStroke.payload
-
+    if (incomingStroke.type === "excalidraw_elements" && Array.isArray(incomingStroke.payload)) {
       isApplyingRemoteRef.current = true
       try {
-        editor.store.mergeRemoteChanges(() => {
-          if (added && Array.isArray(added)) {
-            editor.store.put(added as TLRecord[])
-          }
-          if (updated && Array.isArray(updated)) {
-            editor.store.put(updated as TLRecord[])
-          }
-          if (removed && Array.isArray(removed)) {
-            editor.store.remove(removed)
-          }
+        excalidrawApiRef.current.updateScene({
+          elements: incomingStroke.payload,
         })
       } catch (err) {
-        console.warn("[tldraw] Error merging remote changes:", err)
+        console.warn("[Whiteboard] Error applying remote stroke:", err)
       } finally {
         isApplyingRemoteRef.current = false
       }
     }
   }, [incomingStroke, currentUserId])
 
-  // Handle Board Cleared from SignalR
+  // 3. Ingest Initial Meeting Whiteboard History on Mount
   useEffect(() => {
-    if (isBoardCleared && editorRef.current) {
+    if (!incomingHistory || !excalidrawApiRef.current) return
+
+    if (Array.isArray(incomingHistory) && incomingHistory.length > 0) {
+      const last = incomingHistory[incomingHistory.length - 1]
+      if (Array.isArray(last)) {
+        isApplyingRemoteRef.current = true
+        try {
+          excalidrawApiRef.current.updateScene({ elements: last })
+        } finally {
+          isApplyingRemoteRef.current = false
+        }
+      }
+    }
+  }, [incomingHistory])
+
+  // 4. Handle Clear Whiteboard Event
+  useEffect(() => {
+    if (isBoardCleared && excalidrawApiRef.current) {
       isApplyingRemoteRef.current = true
       try {
-        const editor = editorRef.current
-        const shapeIds = Array.from(editor.getCurrentPageShapeIds())
-        editor.deleteShapes(shapeIds)
+        excalidrawApiRef.current.updateScene({ elements: [] })
       } finally {
         isApplyingRemoteRef.current = false
       }
@@ -139,25 +118,35 @@ export function Whiteboard({
   }, [isBoardCleared])
 
   return (
-    <div className="relative w-full h-full flex flex-col bg-background overflow-hidden select-none">
-      {/* Floating Top Exit Button */}
-      <div className="absolute top-3 right-3 z-50">
+    <div className="relative w-full h-full flex flex-col bg-slate-950 overflow-hidden select-none">
+      {/* Floating Exit Button */}
+      <div className="absolute top-3.5 right-3.5 z-50">
         <Button
           variant="destructive"
           size="sm"
           onClick={onClose}
-          className="rounded-xl h-9 px-3 gap-1.5 font-semibold shadow-xl border border-white/20"
+          className="rounded-xl h-8 px-3 gap-1.5 font-semibold shadow-2xl border border-white/20 hover:scale-105 active:scale-95 transition-all"
         >
           <X className="w-4 h-4" />
           <span>Exit Whiteboard</span>
         </Button>
       </div>
 
-      {/* tldraw Infinite Collaborative Canvas */}
-      <div className="flex-1 w-full h-full tldraw__editor">
-        <Tldraw
-          onMount={handleMount}
-          autoFocus={false}
+      {/* 100% Free & Open-Source (MIT) Excalidraw Collaborative Canvas */}
+      <div className="flex-1 w-full h-full">
+        <Excalidraw
+          excalidrawAPI={(api) => {
+            excalidrawApiRef.current = api
+          }}
+          onChange={handleChange}
+          theme="dark"
+          name="InstaMeets Whiteboard"
+          UIOptions={{
+            canvasActions: {
+              loadScene: false,
+              export: { saveFileToDisk: true },
+            },
+          }}
         />
       </div>
     </div>
