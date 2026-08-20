@@ -79,7 +79,11 @@ public class MeetingController : ControllerBase
     [HttpGet("meetings/{meetingId}/whiteboard")]
     public async Task<IActionResult> GetWhiteboardHistory(string meetingId)
     {
-        var history = await _meetingManager.GetWhiteboardStrokesAsync(meetingId);
-        return Ok(history);
+        var state = await _meetingManager.GetWhiteboardStateAsync(meetingId);
+        if (state == null)
+        {
+            return Ok(Array.Empty<object>());
+        }
+        return Ok(new[] { state });
     }
 }

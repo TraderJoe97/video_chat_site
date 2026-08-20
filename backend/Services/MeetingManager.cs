@@ -3,20 +3,26 @@ using Backend.Models;
 
 namespace Backend.Services;
 
-public class MeetingManager
+public class MeetingManager : IDisposable
 {
     private readonly ConcurrentDictionary<string, Meeting> _meetings = new();
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, Participant>> _meetingParticipants = new();
     private readonly ConcurrentDictionary<string, List<ChatMessage>> _meetingMessages = new();
-    private readonly ConcurrentDictionary<string, List<object>> _whiteboardStrokes = new();
+    private readonly ConcurrentDictionary<string, object> _latestWhiteboardScenes = new();
+    private readonly ConcurrentDictionary<string, DateTime> _pendingWhiteboardSaves = new();
     private readonly ConcurrentDictionary<string, string> _activeScreenSharers = new(); // meetingId -> userId
     private readonly SupabaseService _supabaseService;
     private readonly ILogger<MeetingManager> _logger;
+    private readonly Timer _dbFlushTimer;
+    private bool _disposed;
 
     public MeetingManager(SupabaseService supabaseService, ILogger<MeetingManager> logger)
     {
         _supabaseService = supabaseService;
         _logger = logger;
+
+        // Background debouncer: flushes dirty whiteboard scenes to Supabase every 2 seconds
+        _dbFlushTimer = new Timer(async _ => await FlushDirtyWhiteboardsAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
     public async Task<Meeting> CreateOrGetMeetingAsync(string meetingId, string hostId, string? meetingName = null)
@@ -146,50 +152,28 @@ public class MeetingManager
     }
 
     // =========================================================================
-    // Whiteboard Real-Time & PostgreSQL Database Storage
+    // High-Performance In-Memory Whiteboard Authoritative State & Debounced DB Flush
     // =========================================================================
-    public async Task AddWhiteboardStrokeAsync(string meetingId, object stroke)
+    public void SetWhiteboardState(string meetingId, object strokeOrScene)
     {
-        var strokes = _whiteboardStrokes.GetOrAdd(meetingId, _ => new List<object>());
-        lock (strokes)
-        {
-            strokes.Add(stroke);
-            if (strokes.Count > 5000)
-            {
-                strokes.RemoveRange(0, 1000);
-            }
-        }
+        // 1. Instant zero-latency in-memory state update
+        _latestWhiteboardScenes[meetingId] = strokeOrScene;
 
-        if (_supabaseService.IsConfigured)
-        {
-            await _supabaseService.SaveWhiteboardStateAsync(meetingId, stroke);
-        }
+        // 2. Mark for asynchronous background flush
+        _pendingWhiteboardSaves[meetingId] = DateTime.UtcNow;
     }
 
-    public async Task ClearWhiteboardAsync(string meetingId)
+    public void ClearWhiteboard(string meetingId)
     {
-        if (_whiteboardStrokes.TryGetValue(meetingId, out var strokes))
-        {
-            lock (strokes)
-            {
-                strokes.Clear();
-            }
-        }
-
-        if (_supabaseService.IsConfigured)
-        {
-            await _supabaseService.SaveWhiteboardStateAsync(meetingId, new List<object>());
-        }
+        _latestWhiteboardScenes[meetingId] = new List<object>();
+        _pendingWhiteboardSaves[meetingId] = DateTime.UtcNow;
     }
 
-    public async Task<IEnumerable<object>> GetWhiteboardStrokesAsync(string meetingId)
+    public async Task<object?> GetWhiteboardStateAsync(string meetingId)
     {
-        if (_whiteboardStrokes.TryGetValue(meetingId, out var strokes) && strokes.Count > 0)
+        if (_latestWhiteboardScenes.TryGetValue(meetingId, out var cachedState))
         {
-            lock (strokes)
-            {
-                return strokes.ToList();
-            }
+            return cachedState;
         }
 
         if (_supabaseService.IsConfigured)
@@ -197,16 +181,34 @@ public class MeetingManager
             var dbState = await _supabaseService.FetchWhiteboardStateAsync(meetingId);
             if (dbState != null)
             {
-                var list = _whiteboardStrokes.GetOrAdd(meetingId, _ => new List<object>());
-                lock (list)
-                {
-                    list.Add(dbState);
-                }
-                return new List<object> { dbState };
+                _latestWhiteboardScenes[meetingId] = dbState;
+                return dbState;
             }
         }
 
-        return Enumerable.Empty<object>();
+        return null;
+    }
+
+    private async Task FlushDirtyWhiteboardsAsync()
+    {
+        if (!_supabaseService.IsConfigured || _pendingWhiteboardSaves.IsEmpty) return;
+
+        var keys = _pendingWhiteboardSaves.Keys.ToList();
+        foreach (var meetingId in keys)
+        {
+            if (_pendingWhiteboardSaves.TryRemove(meetingId, out _) &&
+                _latestWhiteboardScenes.TryGetValue(meetingId, out var sceneData))
+            {
+                try
+                {
+                    await _supabaseService.SaveWhiteboardStateAsync(meetingId, sceneData);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Background error flushing whiteboard state for meeting {MeetingId}", meetingId);
+                }
+            }
+        }
     }
 
     public async Task AddMessageAsync(string meetingId, ChatMessage message)
@@ -246,5 +248,14 @@ public class MeetingManager
             }
         }
         return Enumerable.Empty<ChatMessage>();
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _disposed = true;
+            _dbFlushTimer?.Dispose();
+        }
     }
 }

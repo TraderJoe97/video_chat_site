@@ -118,7 +118,7 @@ export function Whiteboard({
   const handlePointerUpdate = useCallback(
     ({ pointer, button }: { pointer: { x: number; y: number }; button: "down" | "up" }) => {
       const now = Date.now()
-      if (now - lastPointerSendRef.current < 40) return // ~25fps smooth presence
+      if (now - lastPointerSendRef.current < 16) return // ~60fps ultra-smooth presence
       lastPointerSendRef.current = now
 
       onSendStroke({
