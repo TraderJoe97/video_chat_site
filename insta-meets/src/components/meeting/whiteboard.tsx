@@ -120,20 +120,7 @@ export function Whiteboard({
 
   return (
     <div className="relative w-full h-full flex flex-col bg-slate-950 overflow-hidden select-none" style={{ width: "100%", height: "100%" }}>
-      {/* Floating Exit Button */}
-      <div className="absolute top-3.5 right-3.5 z-50">
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={onClose}
-          className="rounded-xl h-8 px-3 gap-1.5 font-semibold shadow-2xl border border-white/20 hover:scale-105 active:scale-95 transition-all"
-        >
-          <X className="w-4 h-4" />
-          <span>Exit Whiteboard</span>
-        </Button>
-      </div>
-
-      {/* Excalidraw Collaborative Canvas with styles loaded */}
+      {/* Excalidraw Collaborative Canvas */}
       <div className="flex-1 w-full h-full relative" style={{ width: "100%", height: "100%" }}>
         <Excalidraw
           excalidrawAPI={(api) => {
@@ -142,6 +129,17 @@ export function Whiteboard({
           onChange={handleChange}
           theme="dark"
           name="InstaMeets Whiteboard"
+          renderTopRightUI={() => (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onClose}
+              className="rounded-xl h-8 px-3 gap-1.5 font-semibold shadow-md ml-2 my-auto hover:scale-105 active:scale-95 transition-all"
+            >
+              <X className="w-4 h-4" />
+              <span>Exit Whiteboard</span>
+            </Button>
+          )}
           UIOptions={{
             canvasActions: {
               loadScene: false,
