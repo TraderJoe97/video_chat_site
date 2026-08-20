@@ -99,7 +99,7 @@ export function MediasoupVideoTile({
       <video
         ref={videoRef}
         autoPlay
-        muted={isLocal}
+        muted
         playsInline
         className={cn(
           "w-full h-full object-cover transition-opacity duration-300 bg-muted",

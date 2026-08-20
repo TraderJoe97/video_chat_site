@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Device, type types } from "mediasoup-client"
 import { io, Socket } from "socket.io-client"
+import { fetchTurnServers } from "@/lib/turn-servers"
 
 type Transport = types.Transport
 type Producer = types.Producer
@@ -96,7 +97,7 @@ export function useMediasoup({
             deviceRef.current = device
             console.log("[Mediasoup] Device loaded successfully with handler:", device.handlerName)
 
-            // Create WebRTC Transports
+            // Create WebRTC Transports with STUN / TURN servers
             await initSendTransport(socket, device)
             await initRecvTransport(socket, device)
 
@@ -197,6 +198,7 @@ export function useMediasoup({
 
   // Helper: Create Send WebRtcTransport
   const initSendTransport = async (socket: Socket, device: Device) => {
+    const iceServers = await fetchTurnServers()
     return new Promise<void>((resolve, reject) => {
       socket.emit("create-transport", { direction: "send" }, async (params: any) => {
         if (params?.error) {
@@ -204,8 +206,15 @@ export function useMediasoup({
         }
 
         try {
-          const transport = device.createSendTransport(params)
+          const transport = device.createSendTransport({
+            ...params,
+            iceServers,
+          })
           sendTransportRef.current = transport
+
+          transport.on("connectionstatechange", (state) => {
+            console.log(`[Mediasoup] Send transport state: ${state}`)
+          })
 
           transport.on("connect", ({ dtlsParameters }, callback, errback) => {
             socket.emit("connect-transport", { transportId: transport.id, dtlsParameters }, (res: any) => {
@@ -221,7 +230,7 @@ export function useMediasoup({
             })
           })
 
-          console.log("[Mediasoup] Send transport created successfully")
+          console.log("[Mediasoup] Send transport created successfully with ICE servers")
           resolve()
         } catch (err) {
           reject(err)
@@ -232,6 +241,7 @@ export function useMediasoup({
 
   // Helper: Create Recv WebRtcTransport
   const initRecvTransport = async (socket: Socket, device: Device) => {
+    const iceServers = await fetchTurnServers()
     return new Promise<void>((resolve, reject) => {
       socket.emit("create-transport", { direction: "recv" }, async (params: any) => {
         if (params?.error) {
@@ -239,8 +249,15 @@ export function useMediasoup({
         }
 
         try {
-          const transport = device.createRecvTransport(params)
+          const transport = device.createRecvTransport({
+            ...params,
+            iceServers,
+          })
           recvTransportRef.current = transport
+
+          transport.on("connectionstatechange", (state) => {
+            console.log(`[Mediasoup] Recv transport state: ${state}`)
+          })
 
           transport.on("connect", ({ dtlsParameters }, callback, errback) => {
             socket.emit("connect-transport", { transportId: transport.id, dtlsParameters }, (res: any) => {
@@ -249,7 +266,7 @@ export function useMediasoup({
             })
           })
 
-          console.log("[Mediasoup] Recv transport created successfully")
+          console.log("[Mediasoup] Recv transport created successfully with ICE servers")
           resolve()
         } catch (err) {
           reject(err)
