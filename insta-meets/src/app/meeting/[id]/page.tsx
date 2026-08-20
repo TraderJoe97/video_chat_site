@@ -39,7 +39,7 @@ export default function MeetingPage() {
   const [isAudioEnabled, setIsAudioEnabled] = useState(true)
   const [isVideoEnabled, setIsVideoEnabled] = useState(true)
   const [isScreenSharing, setIsScreenSharing] = useState(false)
-  const [isInitializingMedia, setIsInitializingMedia] = useState(true)
+  const [isInitializingMedia, setIsInitializingMedia] = useState(false)
 
   // Chat and Participants state
   const [messages, setMessages] = useState<SignalRMessage[]>([])
@@ -64,6 +64,7 @@ export default function MeetingPage() {
     let activeStream: MediaStream | null = null
 
     const initMedia = async () => {
+      setIsInitializingMedia(true)
       try {
         console.log("[MeetingPage] Requesting camera and microphone access...")
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -266,20 +267,27 @@ export default function MeetingPage() {
   }
 
   // 6. Loading and Authentication Guards
-  if (isAuthLoading || isInitializingMedia) {
+  if (isAuthLoading && !guestName) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mb-4" />
-        <h2 className="text-xl font-semibold">
-          {isAuthLoading ? "Authenticating session..." : "Preparing your camera & mic..."}
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">Connecting to InstaMeets</p>
+        <h2 className="text-xl font-semibold">Connecting to InstaMeets...</h2>
       </div>
     )
   }
 
   if (!isAuthenticated && !guestName) {
     return <JoinMeetingModal meetingId={meetingId} isOpen={true} onClose={() => {}} />
+  }
+
+  if (isInitializingMedia && !localStream) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mb-4" />
+        <h2 className="text-xl font-semibold">Preparing your camera & mic...</h2>
+        <p className="text-sm text-muted-foreground mt-1">Almost ready</p>
+      </div>
+    )
   }
 
   return (
