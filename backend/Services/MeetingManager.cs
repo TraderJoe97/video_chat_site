@@ -8,6 +8,8 @@ public class MeetingManager
     private readonly ConcurrentDictionary<string, Meeting> _meetings = new();
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, Participant>> _meetingParticipants = new();
     private readonly ConcurrentDictionary<string, List<ChatMessage>> _meetingMessages = new();
+    private readonly ConcurrentDictionary<string, List<object>> _whiteboardStrokes = new();
+    private readonly ConcurrentDictionary<string, string> _activeScreenSharers = new(); // meetingId -> userId
     private readonly SupabaseService _supabaseService;
     private readonly ILogger<MeetingManager> _logger;
 
@@ -17,15 +19,22 @@ public class MeetingManager
         _logger = logger;
     }
 
-    public async Task<Meeting> CreateOrGetMeetingAsync(string meetingId, string hostId, string? meetingName)
+    public async Task<Meeting> CreateOrGetMeetingAsync(string meetingId, string hostId, string? meetingName = null)
     {
-        var meeting = _meetings.GetOrAdd(meetingId, id => new Meeting
+        if (_meetings.TryGetValue(meetingId, out var existing))
         {
-            MeetingId = id,
+            return existing;
+        }
+
+        var meeting = new Meeting
+        {
+            MeetingId = meetingId,
             HostId = hostId,
-            MeetingName = string.IsNullOrWhiteSpace(meetingName) ? $"Meeting {id}" : meetingName,
+            MeetingName = string.IsNullOrWhiteSpace(meetingName) ? $"Meeting {meetingId}" : meetingName,
             CreatedAt = DateTime.UtcNow
-        });
+        };
+
+        _meetings.TryAdd(meetingId, meeting);
 
         if (_supabaseService.IsConfigured)
         {
@@ -33,6 +42,11 @@ public class MeetingManager
         }
 
         return meeting;
+    }
+
+    public Meeting? GetMeeting(string meetingId)
+    {
+        return _meetings.TryGetValue(meetingId, out var meeting) ? meeting : null;
     }
 
     public async Task<IEnumerable<Meeting>> GetAllMeetingsAsync()
@@ -44,36 +58,23 @@ public class MeetingManager
             {
                 foreach (var m in dbMeetings)
                 {
-                    _meetings[m.MeetingId] = m;
+                    _meetings.TryAdd(m.MeetingId, m);
                 }
             }
         }
-
-        return _meetings.Values.OrderByDescending(m => m.CreatedAt);
+        return _meetings.Values;
     }
-
-    public Meeting? GetMeeting(string meetingId) => _meetings.TryGetValue(meetingId, out var m) ? m : null;
 
     public void AddParticipant(string meetingId, Participant participant)
     {
         var participants = _meetingParticipants.GetOrAdd(meetingId, _ => new ConcurrentDictionary<string, Participant>());
-        participants[participant.UserId] = participant;
+        participants.AddOrUpdate(participant.UserId, participant, (_, _) => participant);
     }
-
-    private readonly ConcurrentDictionary<string, string> _activeScreenSharers = new();
 
     public bool TryStartScreenShare(string meetingId, string userId, out string? currentSharerId)
     {
-        currentSharerId = null;
-        if (_activeScreenSharers.TryGetValue(meetingId, out var existingSharer))
-        {
-            if (existingSharer == userId) return true;
-            currentSharerId = existingSharer;
-            return false;
-        }
-
-        _activeScreenSharers[meetingId] = userId;
-        return true;
+        currentSharerId = _activeScreenSharers.GetOrAdd(meetingId, userId);
+        return currentSharerId == userId;
     }
 
     public bool StopScreenShare(string meetingId, string userId)
@@ -144,9 +145,10 @@ public class MeetingManager
             : Enumerable.Empty<Participant>();
     }
 
-    private readonly ConcurrentDictionary<string, List<object>> _whiteboardStrokes = new();
-
-    public void AddWhiteboardStroke(string meetingId, object stroke)
+    // =========================================================================
+    // Whiteboard Real-Time & PostgreSQL Database Storage
+    // =========================================================================
+    public async Task AddWhiteboardStrokeAsync(string meetingId, object stroke)
     {
         var strokes = _whiteboardStrokes.GetOrAdd(meetingId, _ => new List<object>());
         lock (strokes)
@@ -157,9 +159,14 @@ public class MeetingManager
                 strokes.RemoveRange(0, 1000);
             }
         }
+
+        if (_supabaseService.IsConfigured)
+        {
+            await _supabaseService.SaveWhiteboardStateAsync(meetingId, stroke);
+        }
     }
 
-    public void ClearWhiteboard(string meetingId)
+    public async Task ClearWhiteboardAsync(string meetingId)
     {
         if (_whiteboardStrokes.TryGetValue(meetingId, out var strokes))
         {
@@ -168,17 +175,37 @@ public class MeetingManager
                 strokes.Clear();
             }
         }
+
+        if (_supabaseService.IsConfigured)
+        {
+            await _supabaseService.SaveWhiteboardStateAsync(meetingId, new List<object>());
+        }
     }
 
-    public IEnumerable<object> GetWhiteboardStrokes(string meetingId)
+    public async Task<IEnumerable<object>> GetWhiteboardStrokesAsync(string meetingId)
     {
-        if (_whiteboardStrokes.TryGetValue(meetingId, out var strokes))
+        if (_whiteboardStrokes.TryGetValue(meetingId, out var strokes) && strokes.Count > 0)
         {
             lock (strokes)
             {
                 return strokes.ToList();
             }
         }
+
+        if (_supabaseService.IsConfigured)
+        {
+            var dbState = await _supabaseService.FetchWhiteboardStateAsync(meetingId);
+            if (dbState != null)
+            {
+                var list = _whiteboardStrokes.GetOrAdd(meetingId, _ => new List<object>());
+                lock (list)
+                {
+                    list.Add(dbState);
+                }
+                return new List<object> { dbState };
+            }
+        }
+
         return Enumerable.Empty<object>();
     }
 

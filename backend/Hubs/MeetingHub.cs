@@ -134,13 +134,13 @@ public class MeetingHub : Hub
 
     public async Task SendWhiteboardStroke(string meetingId, object strokeData)
     {
-        _meetingManager.AddWhiteboardStroke(meetingId, strokeData);
+        await _meetingManager.AddWhiteboardStrokeAsync(meetingId, strokeData);
         await Clients.OthersInGroup(meetingId).SendAsync("ReceiveWhiteboardStroke", strokeData);
     }
 
     public async Task ClearWhiteboard(string meetingId)
     {
-        _meetingManager.ClearWhiteboard(meetingId);
+        await _meetingManager.ClearWhiteboardAsync(meetingId);
         await Clients.Group(meetingId).SendAsync("WhiteboardCleared");
     }
 
@@ -151,7 +151,7 @@ public class MeetingHub : Hub
 
     public async Task RequestWhiteboardHistory(string meetingId)
     {
-        var history = _meetingManager.GetWhiteboardStrokes(meetingId);
+        var history = await _meetingManager.GetWhiteboardStrokesAsync(meetingId);
         await Clients.Caller.SendAsync("ReceiveWhiteboardHistory", history);
     }
 

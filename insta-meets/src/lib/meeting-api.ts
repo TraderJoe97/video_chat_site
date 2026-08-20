@@ -105,6 +105,27 @@ export async function fetchChatHistory(meetingId: string): Promise<ChatMessageDt
 }
 
 /**
+ * Fetches persisted whiteboard scene data for a meeting from PostgreSQL / .NET API
+ */
+export async function fetchWhiteboardHistory(meetingId: string): Promise<any[]> {
+  const backendUrl = getBackendUrl()
+
+  try {
+    const response = await fetch(`${backendUrl}/api/meetings/${meetingId}/whiteboard`)
+
+    if (!response.ok) {
+      return []
+    }
+
+    const data = await response.json()
+    return Array.isArray(data) ? data : []
+  } catch (error) {
+    console.error("Error fetching whiteboard history:", error)
+    return []
+  }
+}
+
+/**
  * Checks if the server is healthy
  */
 export async function checkServerHealth() {

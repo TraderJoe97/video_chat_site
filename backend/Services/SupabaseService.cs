@@ -176,4 +176,65 @@ public class SupabaseService
 
         return new List<ChatMessage>();
     }
+
+    // =========================================================================
+    // Whiteboard Persistence (PostgreSQL JSONB Storage)
+    // =========================================================================
+    public async Task SaveWhiteboardStateAsync(string meetingId, object sceneData)
+    {
+        if (!_isConfigured) return;
+
+        try
+        {
+            var payload = new
+            {
+                meeting_id = meetingId,
+                scene_data = sceneData,
+                updated_at = DateTime.UtcNow
+            };
+
+            var json = JsonSerializer.Serialize(payload);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync("meeting_whiteboards?on_conflict=meeting_id", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Supabase failed to save whiteboard state for {MeetingId}: {Error}", meetingId, err);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exception saving whiteboard state to Supabase for {MeetingId}", meetingId);
+        }
+    }
+
+    public async Task<object?> FetchWhiteboardStateAsync(string meetingId)
+    {
+        if (!_isConfigured) return null;
+
+        try
+        {
+            var response = await _httpClient.GetAsync($"meeting_whiteboards?meeting_id=eq.{Uri.EscapeDataString(meetingId)}&select=scene_data");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                {
+                    var first = doc.RootElement[0];
+                    if (first.TryGetProperty("scene_data", out var sceneElement))
+                    {
+                        return JsonSerializer.Deserialize<object>(sceneElement.GetRawText());
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exception fetching whiteboard state from Supabase for {MeetingId}", meetingId);
+        }
+
+        return null;
+    }
 }

@@ -75,4 +75,11 @@ public class MeetingController : ControllerBase
         var messages = await _meetingManager.GetMessagesAsync(meetingId);
         return Ok(messages);
     }
+
+    [HttpGet("meetings/{meetingId}/whiteboard")]
+    public async Task<IActionResult> GetWhiteboardHistory(string meetingId)
+    {
+        var history = await _meetingManager.GetWhiteboardStrokesAsync(meetingId);
+        return Ok(history);
+    }
 }

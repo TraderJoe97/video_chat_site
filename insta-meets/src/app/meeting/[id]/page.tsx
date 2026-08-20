@@ -13,7 +13,7 @@ import { Whiteboard, type WhiteboardElement } from "@/components/meeting/whitebo
 import { MediasoupVideoTile } from "@/components/meeting/mediasoup-video-tile"
 import { useWebRTCStream } from "@/hooks/use-webrtc-stream"
 import { useSignalR, type SignalRParticipant, type SignalRMessage } from "@/hooks/use-signalr"
-import { fetchChatHistory } from "@/lib/meeting-api"
+import { fetchChatHistory, fetchWhiteboardHistory } from "@/lib/meeting-api"
 
 export default function MeetingPage() {
   const { id: meetingId } = useParams<{ id: string }>()
@@ -240,7 +240,7 @@ export default function MeetingPage() {
     onReceiveWhiteboardHistory: handleReceiveWhiteboardHistory,
   })
 
-  // Load chat history from Supabase / .NET API on initial join
+  // Load chat and whiteboard history from Supabase / .NET API on initial join
   useEffect(() => {
     if (meetingId) {
       fetchChatHistory(meetingId).then((history) => {
@@ -255,6 +255,12 @@ export default function MeetingPage() {
               isFromCurrentUser: m.senderId === userId,
             })),
           )
+        }
+      })
+
+      fetchWhiteboardHistory(meetingId).then((wbHistory) => {
+        if (wbHistory && wbHistory.length > 0) {
+          setIncomingWhiteboardHistory(wbHistory)
         }
       })
     }
