@@ -213,13 +213,21 @@ export function useMediasoup({
           sendTransportRef.current = transport
 
           transport.on("connectionstatechange", (state) => {
-            console.log(`[Mediasoup] Send transport state: ${state}`)
+            console.log(`[Mediasoup] Send transport connection state: ${state}`)
+          })
+
+          transport.on("icegatheringstatechange", (state) => {
+            console.log(`[Mediasoup] Send transport ICE gathering state: ${state}`)
           })
 
           transport.on("connect", ({ dtlsParameters }, callback, errback) => {
+            console.log("[Mediasoup] Send transport DTLS connect handshake initiated")
             socket.emit("connect-transport", { transportId: transport.id, dtlsParameters }, (res: any) => {
               if (res?.error) errback(new Error(res.error))
-              else callback()
+              else {
+                console.log("[Mediasoup] Send transport DTLS connect handshake succeeded")
+                callback()
+              }
             })
           })
 
@@ -256,13 +264,21 @@ export function useMediasoup({
           recvTransportRef.current = transport
 
           transport.on("connectionstatechange", (state) => {
-            console.log(`[Mediasoup] Recv transport state: ${state}`)
+            console.log(`[Mediasoup] Recv transport connection state: ${state}`)
+          })
+
+          transport.on("icegatheringstatechange", (state) => {
+            console.log(`[Mediasoup] Recv transport ICE gathering state: ${state}`)
           })
 
           transport.on("connect", ({ dtlsParameters }, callback, errback) => {
+            console.log("[Mediasoup] Recv transport DTLS connect handshake initiated")
             socket.emit("connect-transport", { transportId: transport.id, dtlsParameters }, (res: any) => {
               if (res?.error) errback(new Error(res.error))
-              else callback()
+              else {
+                console.log("[Mediasoup] Recv transport DTLS connect handshake succeeded")
+                callback()
+              }
             })
           })
 
@@ -315,9 +331,19 @@ export function useMediasoup({
 
           consumersRef.current.set(consumer.id, consumer)
 
+          consumer.track.onmute = () => {
+            console.warn(`[Mediasoup] Track MUTED for consumer ${consumer.id} (${consumer.kind}) of ${producerData.producerUsername}`)
+          }
+          consumer.track.onunmute = () => {
+            console.log(`[Mediasoup] Track UNMUTED (Receiving RTP!) for consumer ${consumer.id} (${consumer.kind}) of ${producerData.producerUsername}`)
+          }
+          consumer.track.onended = () => {
+            console.warn(`[Mediasoup] Track ENDED for consumer ${consumer.id} (${consumer.kind}) of ${producerData.producerUsername}`)
+          }
+
           // Resume consumer on server
           socket.emit("resume-consumer", { consumerId: consumer.id }, () => {
-            console.log(`[Mediasoup] Consumer ${consumer.id} resumed (${consumer.kind})`)
+            console.log(`[Mediasoup] Consumer ${consumer.id} resumed (${consumer.kind}) on server`)
           })
 
           // For video consumers, request keyframe to trigger immediate frame rendering
@@ -411,6 +437,41 @@ export function useMediasoup({
       publishTracks(localStream)
     }
   }, [localStream])
+
+  // Periodic WebRTC RTP stats monitor
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (videoProducerRef.current) {
+        try {
+          const stats = await videoProducerRef.current.getStats()
+          stats.forEach((report: any) => {
+            if (report.type === "outbound-rtp" && report.kind === "video") {
+              console.log(
+                `[Mediasoup STATS] Local Video Sent: ${report.bytesSent} bytes, ${report.packetsSent} pkts, ${report.framesEncoded || 0} frames encoded, ${report.frameWidth || 0}x${report.frameHeight || 0}`,
+              )
+            }
+          })
+        } catch {}
+      }
+
+      for (const [id, consumer] of consumersRef.current.entries()) {
+        if (consumer.kind === "video") {
+          try {
+            const stats = await consumer.getStats()
+            stats.forEach((report: any) => {
+              if (report.type === "inbound-rtp" && report.kind === "video") {
+                console.log(
+                  `[Mediasoup STATS] Remote Video Recv (${id}): ${report.bytesReceived} bytes, ${report.packetsReceived} pkts, ${report.framesDecoded || 0} frames decoded, ${report.framesReceived || 0} frames received, ${report.frameWidth || 0}x${report.frameHeight || 0}, track.muted=${consumer.track.muted}`,
+                )
+              }
+            })
+          } catch {}
+        }
+      }
+    }, 4000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   // Public Methods for Media Controls
   const setAudioMuted = useCallback((muted: boolean) => {

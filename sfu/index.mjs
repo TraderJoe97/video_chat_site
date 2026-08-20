@@ -198,14 +198,19 @@ io.on("connection", (socket) => {
 
       peer.transports.set(transport.id, transport)
 
+      transport.on("icestatechange", (iceState) => {
+        console.log(`[SFU] Transport ${transport.id} (${direction}) ICE state -> ${iceState} for ${peer.username}`)
+      })
+
       transport.on("dtlsstatechange", (dtlsState) => {
+        console.log(`[SFU] Transport ${transport.id} (${direction}) DTLS state -> ${dtlsState} for ${peer.username}`)
         if (dtlsState === "closed") {
           transport.close()
         }
       })
 
       transport.on("close", () => {
-        console.log(`[SFU] Transport ${transport.id} closed for peer ${peer.username}`)
+        console.log(`[SFU] Transport ${transport.id} (${direction}) closed for peer ${peer.username}`)
       })
 
       console.log(`[SFU] Created ${direction} transport ${transport.id} for ${peer.username}`)
@@ -259,12 +264,16 @@ io.on("connection", (socket) => {
 
       peer.producers.set(producer.id, producer)
 
+      producer.on("score", (score) => {
+        console.log(`[SFU] Producer ${producer.id} (${kind}) score:`, JSON.stringify(score))
+      })
+
       producer.on("transportclose", () => {
         producer.close()
         peer.producers.delete(producer.id)
       })
 
-      console.log(`[SFU] Producer ${producer.id} (${kind}) published by ${peer.username}`)
+      console.log(`[SFU] Producer ${producer.id} (${kind}) published by ${peer.username} with codec ${rtpParameters?.codecs?.[0]?.mimeType}`)
 
       callback({ id: producer.id })
 
@@ -305,6 +314,14 @@ io.on("connection", (socket) => {
 
       peer.consumers.set(consumer.id, consumer)
 
+      consumer.on("score", (score) => {
+        console.log(`[SFU] Consumer ${consumer.id} (${consumer.kind}) score:`, JSON.stringify(score))
+      })
+
+      consumer.on("layerschange", (layers) => {
+        console.log(`[SFU] Consumer ${consumer.id} (${consumer.kind}) layers change:`, JSON.stringify(layers))
+      })
+
       consumer.on("transportclose", () => {
         consumer.close()
         peer.consumers.delete(consumer.id)
@@ -316,7 +333,7 @@ io.on("connection", (socket) => {
         socket.emit("consumer-closed", { consumerId: consumer.id, producerId })
       })
 
-      console.log(`[SFU] Consumer ${consumer.id} (${consumer.kind}) created for ${peer.username}`)
+      console.log(`[SFU] Consumer ${consumer.id} (${consumer.kind}) created for ${peer.username} (producer: ${producerId})`)
 
       callback({
         id: consumer.id,

@@ -42,8 +42,8 @@ export const config = {
   mediasoup: {
     numWorkers: Math.max(1, Object.keys(os.cpus()).length),
     worker: {
-      logLevel: "warn",
-      logTags: ["info", "ice", "dtls", "rtp", "srtp", "rtcp"],
+      logLevel: "debug",
+      logTags: ["info", "ice", "dtls", "rtp", "srtp", "rtcp", "score"],
       rtcMinPort: 20000,
       rtcMaxPort: 29999,
     },

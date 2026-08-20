@@ -101,6 +101,16 @@ export function MediasoupVideoTile({
         autoPlay
         muted
         playsInline
+        onLoadedMetadata={(e) => {
+          const v = e.currentTarget
+          console.log(`[VideoTile ${username}] onLoadedMetadata: ${v.videoWidth}x${v.videoHeight}, readyState: ${v.readyState}`)
+        }}
+        onPlay={() => console.log(`[VideoTile ${username}] onPlay called`)}
+        onPlaying={() => console.log(`[VideoTile ${username}] onPlaying (First video frame decoded & rendered!)`)}
+        onWaiting={() => console.warn(`[VideoTile ${username}] onWaiting (Buffering video data...)`)}
+        onPause={() => console.warn(`[VideoTile ${username}] onPause`)}
+        onStalled={() => console.warn(`[VideoTile ${username}] onStalled (No media data received)`)}
+        onError={(e) => console.error(`[VideoTile ${username}] HTML5 Video Error:`, e.currentTarget.error)}
         className={cn(
           "w-full h-full object-cover transition-opacity duration-300 bg-muted",
           hasRenderableVideo && isVideoEnabled ? "opacity-100" : "opacity-0 absolute inset-0",
