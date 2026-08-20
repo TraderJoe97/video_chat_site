@@ -30,6 +30,7 @@ interface UseSignalRProps {
   onReceiveMessage?: (message: SignalRMessage) => void
   onHandRaised?: (userId: string, isRaised: boolean) => void
   onMediaStatusChanged?: (userId: string, isAudioEnabled: boolean, isVideoEnabled: boolean) => void
+  onReceiveSignal?: (senderUserId: string, signalData: any) => void
   backendUrl?: string
 }
 
@@ -42,6 +43,7 @@ export function useSignalR({
   onReceiveMessage,
   onHandRaised,
   onMediaStatusChanged,
+  onReceiveSignal,
   backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:5000" : "https://video-chat-site.onrender.com"),
 }: UseSignalRProps) {
   const [isConnected, setIsConnected] = useState(false)
@@ -67,10 +69,10 @@ export function useSignalR({
     connectionRef.current = connection
 
     // Event Handlers
-    const handleJoined = (meeting: any, currentParticipants: SignalRParticipant[], chatHistory: any[]) => {
-      console.log(`[SignalR] Successfully joined meeting ${meeting?.meetingId || meetingId}`)
-      if (currentParticipants && Array.isArray(currentParticipants)) {
-        currentParticipants.forEach((p) => {
+    const handleJoined = (data: any) => {
+      console.log(`[SignalR] Successfully joined meeting ${meetingId}`)
+      if (data?.participants && Array.isArray(data.participants)) {
+        data.participants.forEach((p: SignalRParticipant) => {
           if (p.userId !== userId) onUserJoined?.(p)
         })
       }
@@ -107,6 +109,11 @@ export function useSignalR({
       onMediaStatusChanged?.(data.userId, data.isAudioEnabled, data.isVideoEnabled)
     })
 
+    connection.on("ReceiveSignal", (senderUserId: string, signalData: any) => {
+      console.log(`[SignalR] Received WebRTC signal from ${senderUserId}:`, signalData?.type || (signalData?.candidate ? "candidate" : "signal"))
+      onReceiveSignal?.(senderUserId, signalData)
+    })
+
     // Start connection
     const startConnection = async () => {
       try {
@@ -132,7 +139,7 @@ export function useSignalR({
         connection.stop()
       }
     }
-  }, [meetingId, userId, username, backendUrl, onUserJoined, onUserLeft, onReceiveMessage, onHandRaised, onMediaStatusChanged])
+  }, [meetingId, userId, username, backendUrl, onUserJoined, onUserLeft, onReceiveMessage, onHandRaised, onMediaStatusChanged, onReceiveSignal])
 
   // Public Methods
   const sendMessage = useCallback(
@@ -148,6 +155,18 @@ export function useSignalR({
       }
     },
     [meetingId, userId, username, isConnected],
+  )
+
+  const sendSignal = useCallback(
+    async (targetUserId: string, signalData: any) => {
+      if (!connectionRef.current || !isConnected) return
+      try {
+        await connectionRef.current.invoke("SendSignal", targetUserId, userId, signalData)
+      } catch (err) {
+        console.error(`[SignalR] Error sending WebRTC signal to ${targetUserId}:`, err)
+      }
+    },
+    [userId, isConnected],
   )
 
   const raiseHand = useCallback(
@@ -178,6 +197,7 @@ export function useSignalR({
     isConnected,
     connectionError,
     sendMessage,
+    sendSignal,
     raiseHand,
     toggleMediaStatus,
   }

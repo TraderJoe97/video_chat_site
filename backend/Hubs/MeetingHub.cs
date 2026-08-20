@@ -102,6 +102,11 @@ public class MeetingHub : Hub
         });
     }
 
+    public async Task SendSignal(string targetUserId, string senderUserId, object signalData)
+    {
+        await Clients.Group(targetUserId).SendAsync("ReceiveSignal", senderUserId, signalData);
+    }
+
     public async Task LeaveMeeting(string meetingId, string userId)
     {
         _logger.LogInformation("User {UserId} leaving meeting {MeetingId}", userId, meetingId);

@@ -9,7 +9,7 @@ import { MeetingHeader } from "@/components/meeting/meeting-header"
 import { MeetingControls } from "@/components/meeting/meeting-controls"
 import { VideoGrid } from "@/components/meeting/video-grid"
 import { MeetingSidebar } from "@/components/meeting/meeting-sidebar"
-import { useMediasoup } from "@/hooks/use-mediasoup"
+import { useWebRTCStream } from "@/hooks/use-webrtc-stream"
 import { useSignalR, type SignalRParticipant, type SignalRMessage } from "@/hooks/use-signalr"
 import { fetchChatHistory } from "@/lib/meeting-api"
 
@@ -102,26 +102,39 @@ export default function MeetingPage() {
     }
   }, [userId])
 
-  // 3. Mediasoup SFU Client Hook
-  const { isSfuConnected, remoteStreams, setAudioMuted, setVideoMuted } = useMediasoup({
+  // 3. WebRTC Stream Engine Hook
+  const { remoteStreams, initiateCall, handleReceiveSignal, handlePeerLeft } = useWebRTCStream({
     meetingId,
     userId,
     username,
     localStream,
+    isConnected: true,
+    sendSignal: async (targetUserId, signalData) => {
+      await sendSignal(targetUserId, signalData)
+    },
   })
 
   // 4. SignalR Real-Time Presence & Chat Hook (.NET Backend)
-  const handleUserJoined = useCallback((participant: SignalRParticipant) => {
-    setParticipants((prev) => {
-      if (prev.some((p) => p.userId === participant.userId)) return prev
-      return [...prev, participant]
-    })
-    toast.info(`${participant.username} joined the meeting`)
-  }, [])
+  const handleUserJoined = useCallback(
+    (participant: SignalRParticipant) => {
+      setParticipants((prev) => {
+        if (prev.some((p) => p.userId === participant.userId)) return prev
+        return [...prev, participant]
+      })
+      toast.info(`${participant.username} joined the meeting`)
+      // Initiate WebRTC peer connection to newly joined user
+      initiateCall(participant.userId, participant.username)
+    },
+    [initiateCall],
+  )
 
-  const handleUserLeft = useCallback((leftUserId: string) => {
-    setParticipants((prev) => prev.filter((p) => p.userId !== leftUserId))
-  }, [])
+  const handleUserLeft = useCallback(
+    (leftUserId: string) => {
+      setParticipants((prev) => prev.filter((p) => p.userId !== leftUserId))
+      handlePeerLeft(leftUserId)
+    },
+    [handlePeerLeft],
+  )
 
   const handleReceiveMessage = useCallback((message: SignalRMessage) => {
     setMessages((prev) => [...prev, message])
@@ -149,7 +162,7 @@ export default function MeetingPage() {
     [],
   )
 
-  const { isConnected: isSignalRConnected, sendMessage, raiseHand, toggleMediaStatus } = useSignalR({
+  const { isConnected: isSignalRConnected, sendMessage, sendSignal, raiseHand, toggleMediaStatus } = useSignalR({
     meetingId,
     userId,
     username,
@@ -158,6 +171,7 @@ export default function MeetingPage() {
     onReceiveMessage: handleReceiveMessage,
     onHandRaised: handleHandRaised,
     onMediaStatusChanged: handleMediaStatusChanged,
+    onReceiveSignal: handleReceiveSignal,
   })
 
   // Load chat history from Supabase / .NET API on initial join
@@ -188,7 +202,6 @@ export default function MeetingPage() {
       const nextState = !audioTrack.enabled
       audioTrack.enabled = nextState
       setIsAudioEnabled(nextState)
-      setAudioMuted(!nextState)
       toggleMediaStatus(nextState, isVideoEnabled)
       toast.info(nextState ? "Microphone unmuted" : "Microphone muted")
     }
@@ -201,7 +214,6 @@ export default function MeetingPage() {
       const nextState = !videoTrack.enabled
       videoTrack.enabled = nextState
       setIsVideoEnabled(nextState)
-      setVideoMuted(!nextState)
       toggleMediaStatus(isAudioEnabled, nextState)
       toast.info(nextState ? "Camera enabled" : "Camera disabled")
     }
@@ -292,12 +304,12 @@ export default function MeetingPage() {
 
   return (
     <div ref={containerRef} className="flex flex-col h-screen bg-background text-foreground overflow-hidden select-none">
-      {/* 1. Header (themed identically to Dashboard) */}
+      {/* 1. Header */}
       <MeetingHeader
         meetingId={meetingId}
         isFullscreen={isFullscreen}
         toggleFullscreen={toggleFullscreen}
-        isSfuConnected={isSfuConnected}
+        isSfuConnected={isSignalRConnected}
         isSignalRConnected={isSignalRConnected}
       />
 
