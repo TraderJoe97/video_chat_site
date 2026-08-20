@@ -13,6 +13,8 @@ public class SupabaseService
     private readonly string? _supabaseUrl;
     private readonly string? _supabaseKey;
     private readonly bool _isConfigured;
+    private bool _isWhiteboardTableAvailable = true;
+    private DateTime _lastWhiteboardCheck = DateTime.MinValue;
 
     public SupabaseService(IConfiguration configuration, ILogger<SupabaseService> logger)
     {
@@ -184,8 +186,16 @@ public class SupabaseService
     {
         if (!_isConfigured) return;
 
+        // If table was missing, retry only every 60 seconds to avoid flooding logs
+        if (!_isWhiteboardTableAvailable && DateTime.UtcNow - _lastWhiteboardCheck < TimeSpan.FromSeconds(60))
+        {
+            return;
+        }
+
         try
         {
+            _lastWhiteboardCheck = DateTime.UtcNow;
+
             var payload = new
             {
                 meeting_id = meetingId,
@@ -200,7 +210,22 @@ public class SupabaseService
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("Supabase failed to save whiteboard state for {MeetingId}: {Error}", meetingId, err);
+                if (err.Contains("PGRST205") || err.Contains("schema cache") || err.Contains("relation") || err.Contains("does not exist"))
+                {
+                    if (_isWhiteboardTableAvailable)
+                    {
+                        _isWhiteboardTableAvailable = false;
+                        _logger.LogWarning("Supabase table 'public.meeting_whiteboards' not yet created. Using in-memory fallback. Run schema.sql in Supabase SQL editor to enable PostgreSQL whiteboard storage.");
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Supabase failed to save whiteboard state for {MeetingId}: {Error}", meetingId, err);
+                }
+            }
+            else
+            {
+                _isWhiteboardTableAvailable = true;
             }
         }
         catch (Exception ex)
@@ -211,7 +236,7 @@ public class SupabaseService
 
     public async Task<object?> FetchWhiteboardStateAsync(string meetingId)
     {
-        if (!_isConfigured) return null;
+        if (!_isConfigured || !_isWhiteboardTableAvailable) return null;
 
         try
         {
@@ -227,6 +252,14 @@ public class SupabaseService
                     {
                         return JsonSerializer.Deserialize<object>(sceneElement.GetRawText());
                     }
+                }
+            }
+            else
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                if (err.Contains("PGRST205") || err.Contains("schema cache"))
+                {
+                    _isWhiteboardTableAvailable = false;
                 }
             }
         }
