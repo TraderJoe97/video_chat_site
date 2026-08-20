@@ -50,6 +50,27 @@ export function useSignalR({
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const connectionRef = useRef<signalR.HubConnection | null>(null)
 
+  // Store callbacks in stable refs to avoid reconnecting on re-renders
+  const callbacksRef = useRef({
+    onUserJoined,
+    onUserLeft,
+    onReceiveMessage,
+    onHandRaised,
+    onMediaStatusChanged,
+    onReceiveSignal,
+  })
+
+  useEffect(() => {
+    callbacksRef.current = {
+      onUserJoined,
+      onUserLeft,
+      onReceiveMessage,
+      onHandRaised,
+      onMediaStatusChanged,
+      onReceiveSignal,
+    }
+  })
+
   useEffect(() => {
     if (!meetingId || !userId) return
 
@@ -73,7 +94,7 @@ export function useSignalR({
       console.log(`[SignalR] Successfully joined meeting ${meetingId}`)
       if (data?.participants && Array.isArray(data.participants)) {
         data.participants.forEach((p: SignalRParticipant) => {
-          if (p.userId !== userId) onUserJoined?.(p)
+          if (p.userId !== userId) callbacksRef.current.onUserJoined?.(p)
         })
       }
     }
@@ -83,17 +104,17 @@ export function useSignalR({
 
     connection.on("UserJoined", (participant: SignalRParticipant) => {
       console.log(`[SignalR] User joined: ${participant.username} (${participant.userId})`)
-      onUserJoined?.(participant)
+      callbacksRef.current.onUserJoined?.(participant)
     })
 
     connection.on("UserLeft", (leftUserId: string) => {
       console.log(`[SignalR] User left: ${leftUserId}`)
-      onUserLeft?.(leftUserId)
+      callbacksRef.current.onUserLeft?.(leftUserId)
     })
 
     connection.on("ReceiveMessage", (message: SignalRMessage) => {
       console.log(`[SignalR] Received message from ${message.senderName}:`, message.content)
-      onReceiveMessage?.({
+      callbacksRef.current.onReceiveMessage?.({
         ...message,
         isFromCurrentUser: message.senderId === userId,
       })
@@ -101,17 +122,17 @@ export function useSignalR({
 
     connection.on("UserRaisedHand", (data: { userId: string; isRaised: boolean }) => {
       console.log(`[SignalR] Hand raised status changed for ${data.userId}:`, data.isRaised)
-      onHandRaised?.(data.userId, data.isRaised)
+      callbacksRef.current.onHandRaised?.(data.userId, data.isRaised)
     })
 
     connection.on("UserMediaStatusChanged", (data: { userId: string; isAudioEnabled: boolean; isVideoEnabled: boolean }) => {
       console.log(`[SignalR] Media status changed for ${data.userId}`)
-      onMediaStatusChanged?.(data.userId, data.isAudioEnabled, data.isVideoEnabled)
+      callbacksRef.current.onMediaStatusChanged?.(data.userId, data.isAudioEnabled, data.isVideoEnabled)
     })
 
     connection.on("ReceiveSignal", (senderUserId: string, signalData: any) => {
       console.log(`[SignalR] Received WebRTC signal from ${senderUserId}:`, signalData?.type || (signalData?.candidate ? "candidate" : "signal"))
-      onReceiveSignal?.(senderUserId, signalData)
+      callbacksRef.current.onReceiveSignal?.(senderUserId, signalData)
     })
 
     // Start connection
@@ -139,7 +160,7 @@ export function useSignalR({
         connection.stop()
       }
     }
-  }, [meetingId, userId, username, backendUrl, onUserJoined, onUserLeft, onReceiveMessage, onHandRaised, onMediaStatusChanged, onReceiveSignal])
+  }, [meetingId, userId, backendUrl])
 
   // Public Methods
   const sendMessage = useCallback(
@@ -159,14 +180,17 @@ export function useSignalR({
 
   const sendSignal = useCallback(
     async (targetUserId: string, signalData: any) => {
-      if (!connectionRef.current || !isConnected) return
+      if (!connectionRef.current || connectionRef.current.state !== signalR.HubConnectionState.Connected) {
+        console.warn(`[SignalR] Cannot send signal to ${targetUserId}: Connection state is ${connectionRef.current?.state}`)
+        return
+      }
       try {
         await connectionRef.current.invoke("SendSignal", targetUserId, userId, signalData)
       } catch (err) {
         console.error(`[SignalR] Error sending WebRTC signal to ${targetUserId}:`, err)
       }
     },
-    [userId, isConnected],
+    [userId],
   )
 
   const raiseHand = useCallback(

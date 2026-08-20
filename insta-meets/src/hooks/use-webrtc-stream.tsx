@@ -11,6 +11,14 @@ export interface RemoteParticipantStream {
   isVideoEnabled: boolean
 }
 
+interface PeerState {
+  pc: RTCPeerConnection
+  isMakingOffer: boolean
+  ignoreOffer: boolean
+  isPolite: boolean
+  pendingCandidates: RTCIceCandidateInit[]
+}
+
 interface UseWebRTCStreamProps {
   meetingId: string
   userId: string
@@ -29,17 +37,15 @@ export function useWebRTCStream({
   sendSignal,
 }: UseWebRTCStreamProps) {
   const [remoteStreams, setRemoteStreams] = useState<Map<string, RemoteParticipantStream>>(new Map())
-  const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map())
+  const peersRef = useRef<Map<string, PeerState>>(new Map())
   const iceServersRef = useRef<RTCIceServer[]>([])
   const localStreamRef = useRef<MediaStream | null>(null)
-  const pendingCandidates = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
   const isMountedRef = useRef(true)
 
   localStreamRef.current = localStream
 
   useEffect(() => {
     isMountedRef.current = true
-    // Fetch Metered TURN & Google STUN servers on mount
     fetchTurnServers().then((servers) => {
       iceServersRef.current = servers
       console.log(`[WebRTC] Loaded ${servers.length} ICE/TURN servers`)
@@ -47,20 +53,22 @@ export function useWebRTCStream({
 
     return () => {
       isMountedRef.current = false
-      peerConnections.current.forEach((pc) => pc.close())
-      peerConnections.current.clear()
+      peersRef.current.forEach((peer) => peer.pc.close())
+      peersRef.current.clear()
     }
   }, [])
 
-  // Create or get RTCPeerConnection for a peer
-  const getOrCreatePeerConnection = useCallback(
-    (peerUserId: string, peerUsername?: string): RTCPeerConnection => {
-      const existingPc = peerConnections.current.get(peerUserId)
-      if (existingPc && existingPc.signalingState !== "closed") {
-        return existingPc
+  // Create or get RTCPeerConnection with W3C Perfect Negotiation Pattern
+  const getOrCreatePeer = useCallback(
+    (peerUserId: string, peerUsername?: string): PeerState => {
+      const existing = peersRef.current.get(peerUserId)
+      if (existing && existing.pc.signalingState !== "closed") {
+        return existing
       }
 
-      console.log(`[WebRTC] Creating new RTCPeerConnection for ${peerUsername || peerUserId}`)
+      // Deterministic Polite vs Impolite peer assignment
+      const isPolite = userId.localeCompare(peerUserId) > 0
+      console.log(`[WebRTC] Initializing PeerConnection with ${peerUsername || peerUserId} (Polite: ${isPolite})`)
 
       const pc = new RTCPeerConnection({
         iceServers: iceServersRef.current.length > 0 ? iceServersRef.current : [
@@ -71,15 +79,41 @@ export function useWebRTCStream({
         iceTransportPolicy: "all",
       })
 
-      // Add local media tracks
+      const peerState: PeerState = {
+        pc,
+        isMakingOffer: false,
+        ignoreOffer: false,
+        isPolite,
+        pendingCandidates: [],
+      }
+
+      // 1. Add Local Tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
           pc.addTrack(track, localStreamRef.current!)
-          console.log(`[WebRTC] Added local track ${track.kind} to peer ${peerUserId}`)
+          console.log(`[WebRTC] Added local track (${track.kind}) to peer ${peerUserId}`)
         })
       }
 
-      // Handle ICE Candidates
+      // 2. Perfect Negotiation: onnegotiationneeded
+      pc.onnegotiationneeded = async () => {
+        try {
+          peerState.isMakingOffer = true
+          await pc.setLocalDescription()
+          console.log(`[WebRTC] Negotiation needed: sending offer to ${peerUserId}`)
+          await sendSignal(peerUserId, {
+            type: "offer",
+            sdp: pc.localDescription,
+            username,
+          })
+        } catch (err) {
+          console.error(`[WebRTC] Error during negotiation with ${peerUserId}:`, err)
+        } finally {
+          peerState.isMakingOffer = false
+        }
+      }
+
+      // 3. ICE Candidate Dispatch
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           sendSignal(peerUserId, {
@@ -89,40 +123,40 @@ export function useWebRTCStream({
         }
       }
 
-      // Handle Remote Media Tracks
+      // 4. Remote Media Track Ingestion
       pc.ontrack = (event) => {
-        console.log(`[WebRTC] Received remote track ${event.track.kind} from ${peerUserId}`)
+        console.log(`[WebRTC] Received remote track (${event.track.kind}) from ${peerUserId}`)
         const [incomingStream] = event.streams
         const track = event.track
 
         setRemoteStreams((prev) => {
           const next = new Map(prev)
-          const existing = next.get(peerUserId)
+          const existingRemote = next.get(peerUserId)
 
           let stream: MediaStream
           if (incomingStream) {
             stream = incomingStream
-          } else if (existing?.stream) {
-            existing.stream.addTrack(track)
-            stream = new MediaStream(existing.stream.getTracks())
+          } else if (existingRemote?.stream) {
+            existingRemote.stream.addTrack(track)
+            stream = new MediaStream(existingRemote.stream.getTracks())
           } else {
             stream = new MediaStream([track])
           }
 
           next.set(peerUserId, {
             userId: peerUserId,
-            username: peerUsername || existing?.username || peerUserId,
+            username: peerUsername || existingRemote?.username || peerUserId,
             stream,
             isAudioEnabled: stream.getAudioTracks().some((t) => t.enabled),
             isVideoEnabled: stream.getVideoTracks().some((t) => t.enabled),
           })
 
-          console.log(`[WebRTC] Updated remote stream for ${peerUserId}: ${stream.getTracks().length} track(s)`)
+          console.log(`[WebRTC] Remote stream active for ${peerUserId}: ${stream.getTracks().length} track(s)`)
           return next
         })
       }
 
-      // Connection State Monitoring
+      // 5. Connection State Lifecycle
       pc.onconnectionstatechange = () => {
         console.log(`[WebRTC] Connection state with ${peerUserId} -> ${pc.connectionState}`)
         if (pc.connectionState === "failed" || pc.connectionState === "closed") {
@@ -138,97 +172,95 @@ export function useWebRTCStream({
         console.log(`[WebRTC] ICE state with ${peerUserId} -> ${pc.iceConnectionState}`)
       }
 
-      peerConnections.current.set(peerUserId, pc)
-      return pc
+      peersRef.current.set(peerUserId, peerState)
+      return peerState
     },
-    [sendSignal],
+    [sendSignal, userId, username],
   )
 
-  // Initiate Call (Offer) to a newly joined participant
-  const initiateCall = useCallback(
-    async (peerUserId: string, peerUsername?: string) => {
-      try {
-        const pc = getOrCreatePeerConnection(peerUserId, peerUsername)
-        const offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-        })
-        await pc.setLocalDescription(offer)
-        console.log(`[WebRTC] Sent SDP offer to ${peerUserId}`)
-
-        await sendSignal(peerUserId, {
-          type: "offer",
-          sdp: offer,
-          username,
-        })
-      } catch (err) {
-        console.error(`[WebRTC] Error initiating call to ${peerUserId}:`, err)
-      }
-    },
-    [getOrCreatePeerConnection, sendSignal, username],
-  )
-
-  // Handle Incoming Signal from SignalR
+  // Handle incoming Signal from SignalR with Glare Resolution
   const handleReceiveSignal = useCallback(
     async (senderUserId: string, signal: any) => {
       if (!signal || senderUserId === userId) return
 
       try {
-        const pc = getOrCreatePeerConnection(senderUserId, signal.username)
+        const peer = getOrCreatePeer(senderUserId, signal.username)
+        const { pc, isPolite } = peer
 
         if (signal.type === "offer" && signal.sdp) {
-          console.log(`[WebRTC] Handling SDP offer from ${senderUserId}`)
+          const offerCollision = peer.isMakingOffer || pc.signalingState !== "stable"
+          peer.ignoreOffer = !isPolite && offerCollision
+
+          if (peer.ignoreOffer) {
+            console.log(`[WebRTC Glare] Impolite peer ignoring offer from ${senderUserId}`)
+            return
+          }
+
+          if (offerCollision) {
+            console.log(`[WebRTC Glare] Polite peer rolling back to accept offer from ${senderUserId}`)
+            await pc.setLocalDescription({ type: "rollback" }).catch(() => {})
+          }
+
           await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp))
 
-          // Process any queued candidates
-          const queued = pendingCandidates.current.get(senderUserId) || []
-          for (const cand of queued) {
-            await pc.addIceCandidate(new RTCIceCandidate(cand))
+          // Drain any pending candidates
+          for (const cand of peer.pendingCandidates) {
+            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {})
           }
-          pendingCandidates.current.delete(senderUserId)
+          peer.pendingCandidates = []
 
-          const answer = await pc.createAnswer()
-          await pc.setLocalDescription(answer)
-          console.log(`[WebRTC] Sent SDP answer to ${senderUserId}`)
-
+          await pc.setLocalDescription()
+          console.log(`[WebRTC] Sent answer to ${senderUserId}`)
           await sendSignal(senderUserId, {
             type: "answer",
-            sdp: answer,
+            sdp: pc.localDescription,
             username,
           })
         } else if (signal.type === "answer" && signal.sdp) {
-          console.log(`[WebRTC] Handling SDP answer from ${senderUserId}`)
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp))
+          console.log(`[WebRTC] Received answer from ${senderUserId}`)
+          if (pc.signalingState === "have-local-offer") {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp))
 
-          // Process any queued candidates
-          const queued = pendingCandidates.current.get(senderUserId) || []
-          for (const cand of queued) {
-            await pc.addIceCandidate(new RTCIceCandidate(cand))
+            // Drain any pending candidates
+            for (const cand of peer.pendingCandidates) {
+              await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {})
+            }
+            peer.pendingCandidates = []
           }
-          pendingCandidates.current.delete(senderUserId)
         } else if (signal.type === "candidate" && signal.candidate) {
           if (pc.remoteDescription && pc.remoteDescription.type) {
-            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate))
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate)).catch((err) => {
+              if (!peer.ignoreOffer) {
+                console.warn(`[WebRTC] Error adding ICE candidate from ${senderUserId}:`, err.message)
+              }
+            })
           } else {
-            const queued = pendingCandidates.current.get(senderUserId) || []
-            queued.push(signal.candidate)
-            pendingCandidates.current.set(senderUserId, queued)
+            peer.pendingCandidates.push(signal.candidate)
           }
         }
       } catch (err) {
         console.error(`[WebRTC] Error handling signal from ${senderUserId}:`, err)
       }
     },
-    [getOrCreatePeerConnection, sendSignal, userId, username],
+    [getOrCreatePeer, sendSignal, userId, username],
+  )
+
+  // Initiate call when a new peer joins
+  const initiateCall = useCallback(
+    (peerUserId: string, peerUsername?: string) => {
+      if (peerUserId === userId) return
+      getOrCreatePeer(peerUserId, peerUsername)
+    },
+    [getOrCreatePeer, userId],
   )
 
   // Peer Left Cleanup
   const handlePeerLeft = useCallback((leftUserId: string) => {
     console.log(`[WebRTC] Cleaning up peer ${leftUserId}`)
-    const pc = peerConnections.current.get(leftUserId)
-    if (pc) {
-      pc.close()
-      peerConnections.current.delete(leftUserId)
+    const peer = peersRef.current.get(leftUserId)
+    if (peer) {
+      peer.pc.close()
+      peersRef.current.delete(leftUserId)
     }
     setRemoteStreams((prev) => {
       const next = new Map(prev)
@@ -237,18 +269,18 @@ export function useWebRTCStream({
     })
   }, [])
 
-  // Sync local tracks if localStream updates dynamically
+  // Sync local tracks dynamically if media stream updates
   useEffect(() => {
     if (!localStream) return
 
-    peerConnections.current.forEach((pc, peerUserId) => {
-      const senders = pc.getSenders()
+    peersRef.current.forEach((peer) => {
+      const senders = peer.pc.getSenders()
       localStream.getTracks().forEach((track) => {
         const sender = senders.find((s) => s.track?.kind === track.kind)
         if (sender) {
           sender.replaceTrack(track)
         } else {
-          pc.addTrack(track, localStream)
+          peer.pc.addTrack(track, localStream)
         }
       })
     })
