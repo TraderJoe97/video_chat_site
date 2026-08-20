@@ -72,27 +72,43 @@ export function Whiteboard({
   const excalidrawApiRef = useRef<any>(null)
   const isApplyingRemoteRef = useRef(false)
   const lastSentVersionRef = useRef<number>(0)
+  const lastFilesCountRef = useRef<number>(0)
   const lastPointerSendRef = useRef<number>(0)
   const collaboratorsMapRef = useRef<Map<string, any>>(new Map())
 
-  // 1. Send Local Drawing Elements to SignalR only when elements are updated
+  // 1. Send Local Drawing Elements & Binary Images to SignalR
   const handleChange = useCallback(
     (elements: readonly any[], appState: any) => {
       if (isApplyingRemoteRef.current) return
 
-      // Calculate aggregate element version to detect actual user drawing mutations
+      const api = excalidrawApiRef.current
+      const currentFiles = api?.getFiles() || {}
+      const filesArray = Object.values(currentFiles)
+
+      // Calculate aggregate element version to detect mutations
       let currentVersion = 0
       for (const el of elements) {
         currentVersion += el.version || 0
       }
 
-      if (currentVersion === lastSentVersionRef.current) return
+      // Check if elements or attached binary files (images/stickers) changed
+      if (
+        currentVersion === lastSentVersionRef.current &&
+        filesArray.length === lastFilesCountRef.current
+      ) {
+        return
+      }
+
       lastSentVersionRef.current = currentVersion
+      lastFilesCountRef.current = filesArray.length
 
       onSendStroke({
         type: "excalidraw_elements",
         senderId: currentUserId,
-        payload: elements,
+        payload: {
+          elements,
+          files: filesArray,
+        },
       })
     },
     [currentUserId, onSendStroke]
@@ -119,23 +135,38 @@ export function Whiteboard({
     [currentUserId, currentUsername, onSendStroke]
   )
 
-  // 3. Ingest Incoming Remote Drawing Elements & Cursors from SignalR
+  // 3. Ingest Incoming Remote Drawing Elements, Images & Cursors from SignalR
   useEffect(() => {
     if (!incomingStroke || !excalidrawApiRef.current) return
     if (incomingStroke.senderId === currentUserId) return
 
     const api = excalidrawApiRef.current
 
-    // Handle Remote Stroke Changes with Reconciler (Prevents flashing/overwriting)
-    if (incomingStroke.type === "excalidraw_elements" && Array.isArray(incomingStroke.payload)) {
+    // Handle Remote Stroke & Binary Image File Changes
+    if (incomingStroke.type === "excalidraw_elements" && incomingStroke.payload) {
+      let incomingElements: any[] = []
+      let incomingFiles: any[] = []
+
+      if (Array.isArray(incomingStroke.payload)) {
+        incomingElements = incomingStroke.payload
+      } else if (incomingStroke.payload.elements) {
+        incomingElements = incomingStroke.payload.elements
+        incomingFiles = incomingStroke.payload.files || []
+      }
+
       isApplyingRemoteRef.current = true
       try {
+        // Ingest binary images first so Excalidraw can render image shapes immediately
+        if (Array.isArray(incomingFiles) && incomingFiles.length > 0) {
+          api.addFiles(incomingFiles)
+        }
+
         const localElements = api.getSceneElementsIncludingDeleted()
         const appState = api.getAppState()
-        const reconciled = reconcileElements(localElements, incomingStroke.payload, appState)
+        const reconciled = reconcileElements(localElements, incomingElements, appState)
         api.updateScene({ elements: reconciled })
       } catch (err) {
-        console.warn("[Whiteboard] Error reconciling remote stroke:", err)
+        console.warn("[Whiteboard] Error reconciling remote stroke & images:", err)
       } finally {
         isApplyingRemoteRef.current = false
       }
@@ -169,16 +200,24 @@ export function Whiteboard({
     return () => clearInterval(interval)
   }, [])
 
-  // 4. Ingest Initial Meeting Whiteboard History on Mount
+  // 4. Ingest Initial Meeting Whiteboard History (Elements & Files) on Mount
   useEffect(() => {
     if (!incomingHistory || !excalidrawApiRef.current) return
 
     if (Array.isArray(incomingHistory) && incomingHistory.length > 0) {
       const last = incomingHistory[incomingHistory.length - 1]
-      if (Array.isArray(last)) {
+      if (last) {
+        const api = excalidrawApiRef.current
         isApplyingRemoteRef.current = true
         try {
-          excalidrawApiRef.current.updateScene({ elements: last })
+          if (Array.isArray(last)) {
+            api.updateScene({ elements: last })
+          } else if (last.elements) {
+            if (Array.isArray(last.files) && last.files.length > 0) {
+              api.addFiles(last.files)
+            }
+            api.updateScene({ elements: last.elements })
+          }
         } finally {
           isApplyingRemoteRef.current = false
         }
@@ -200,7 +239,7 @@ export function Whiteboard({
 
   return (
     <div className="relative w-full h-full flex flex-col bg-slate-950 overflow-hidden select-none" style={{ width: "100%", height: "100%" }}>
-      {/* Excalidraw Collaborative Canvas with Reconciler, Cursors & Libraries */}
+      {/* Excalidraw Collaborative Canvas with Binary Image File Sync & Cursors */}
       <div className="flex-1 w-full h-full relative" style={{ width: "100%", height: "100%" }}>
         <Excalidraw
           excalidrawAPI={(api) => {
