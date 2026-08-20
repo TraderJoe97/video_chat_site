@@ -188,11 +188,9 @@ export default function MeetingPage() {
       if (isSharing && sharerUserId && sharerUserId !== userId) {
         const sharer = participants.find((p) => p.userId === sharerUserId)
         toast.info(`${sharer?.username || "A participant"} started sharing their screen`)
-      } else if (!isSharing && !isScreenSharing) {
-        toast.info("Screen sharing ended")
       }
     },
-    [participants, userId, isScreenSharing],
+    [participants, userId],
   )
 
   // Whiteboard SignalR Handlers
@@ -203,14 +201,10 @@ export default function MeetingPage() {
   const handleWhiteboardCleared = useCallback(() => {
     setIsBoardCleared(true)
     setTimeout(() => setIsBoardCleared(false), 200)
-    toast.info("Whiteboard was cleared by a participant")
   }, [])
 
-  // Informative toast without forcing other participants' views
-  const handleWhiteboardToggled = useCallback((isOpen: boolean) => {
-    if (isOpen) {
-      toast.info("Whiteboard is being edited by a participant. Click Whiteboard to view.")
-    }
+  const handleWhiteboardToggled = useCallback(() => {
+    // Individual view - no notification needed
   }, [])
 
   const handleReceiveWhiteboardHistory = useCallback((history: any[]) => {
@@ -275,7 +269,6 @@ export default function MeetingPage() {
       audioTrack.enabled = nextState
       setIsAudioEnabled(nextState)
       toggleMediaStatus(nextState, isVideoEnabled)
-      toast.info(nextState ? "Microphone unmuted" : "Microphone muted")
     }
   }
 
@@ -287,7 +280,6 @@ export default function MeetingPage() {
       videoTrack.enabled = nextState
       setIsVideoEnabled(nextState)
       toggleMediaStatus(isAudioEnabled, nextState)
-      toast.info(nextState ? "Camera enabled" : "Camera disabled")
     }
   }
 
@@ -295,7 +287,6 @@ export default function MeetingPage() {
     const nextState = !isHandRaised
     setIsHandRaised(nextState)
     raiseHand(nextState)
-    toast.info(nextState ? "Hand raised ✋" : "Hand lowered")
   }
 
   const stopLocalScreenShare = useCallback(async () => {
@@ -307,7 +298,6 @@ export default function MeetingPage() {
     await removeScreenTrack()
     setIsScreenSharing(false)
     await stopScreenShare()
-    toast.info("Screen sharing ended")
   }, [removeScreenTrack, stopScreenShare])
 
   const toggleScreenShare = async () => {
@@ -315,7 +305,7 @@ export default function MeetingPage() {
       await stopLocalScreenShare()
     } else {
       if (activeScreenSharerId && activeScreenSharerId !== userId) {
-        toast.error("Another participant is already sharing their screen. Only one person may share at a time.")
+        toast.error("Another participant is already sharing their screen.")
         return
       }
 
@@ -347,7 +337,6 @@ export default function MeetingPage() {
 
         await addScreenTrack(screenTrack, screenStream)
         setIsScreenSharing(true)
-        toast.success("Screen sharing started")
       } catch (err: any) {
         await stopScreenShare()
         if (err.name !== "NotAllowedError") {
@@ -363,9 +352,6 @@ export default function MeetingPage() {
     setIsWhiteboardOpen(nextState)
     if (nextState) {
       requestWhiteboardHistory()
-      toast.info("Whiteboard opened")
-    } else {
-      toast.info("Whiteboard closed")
     }
   }
 
