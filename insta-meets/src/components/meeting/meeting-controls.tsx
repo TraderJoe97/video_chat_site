@@ -14,6 +14,8 @@ interface MeetingControlsProps {
   toggleHandRaise: () => void
   isScreenSharing?: boolean
   toggleScreenShare?: () => void
+  isScreenShareDisabled?: boolean
+  screenShareDisabledReason?: string
   isSidebarOpen?: boolean
   activeTab?: string
   toggleSidebar?: (tab: string) => void
@@ -31,6 +33,8 @@ export function MeetingControls({
   toggleHandRaise,
   isScreenSharing = false,
   toggleScreenShare,
+  isScreenShareDisabled = false,
+  screenShareDisabledReason,
   isSidebarOpen = false,
   activeTab = "chat",
   toggleSidebar,
@@ -90,17 +94,24 @@ export function MeetingControls({
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant={isScreenSharing ? "default" : "outline"}
-                  size="icon"
-                  onClick={toggleScreenShare}
-                  className="rounded-xl h-11 w-11 transition-all duration-200"
-                >
-                  <Share2 className="h-5 w-5" />
-                </Button>
+                <span>
+                  <Button
+                    variant={isScreenSharing ? "default" : "outline"}
+                    size="icon"
+                    disabled={isScreenShareDisabled && !isScreenSharing}
+                    onClick={toggleScreenShare}
+                    className={cn(
+                      "rounded-xl h-11 w-11 transition-all duration-200",
+                      isScreenSharing ? "bg-emerald-600 hover:bg-emerald-700 text-white font-bold" : "",
+                      isScreenShareDisabled && !isScreenSharing ? "opacity-50 cursor-not-allowed" : ""
+                    )}
+                  >
+                    <Share2 className="h-5 w-5" />
+                  </Button>
+                </span>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {isScreenSharing ? "Stop Sharing Screen" : "Share Screen"}
+                {isScreenSharing ? "Stop Sharing Screen" : (isScreenShareDisabled ? (screenShareDisabledReason || "Another participant is sharing their screen") : "Share Screen")}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

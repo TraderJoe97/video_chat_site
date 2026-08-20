@@ -286,10 +286,26 @@ export function useWebRTCStream({
     })
   }, [localStream])
 
+  // Explicitly replace video track (e.g. for screen sharing or camera toggle)
+  const replaceVideoTrack = useCallback(async (newTrack: MediaStreamTrack | null) => {
+    for (const peer of peersRef.current.values()) {
+      const videoSender = peer.pc.getSenders().find((s) => s.track?.kind === "video")
+      if (videoSender) {
+        try {
+          await videoSender.replaceTrack(newTrack)
+          console.log(`[WebRTC] Replaced video track for peer (newTrack: ${newTrack?.label || "null"})`)
+        } catch (err) {
+          console.error("[WebRTC] Error replacing video track:", err)
+        }
+      }
+    }
+  }, [])
+
   return {
     remoteStreams,
     initiateCall,
     handleReceiveSignal,
     handlePeerLeft,
+    replaceVideoTrack,
   }
 }

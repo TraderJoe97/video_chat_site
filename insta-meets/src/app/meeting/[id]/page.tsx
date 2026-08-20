@@ -41,6 +41,10 @@ export default function MeetingPage() {
   const [isScreenSharing, setIsScreenSharing] = useState(false)
   const [isInitializingMedia, setIsInitializingMedia] = useState(false)
 
+  // Media stream references
+  const cameraStreamRef = useRef<MediaStream | null>(null)
+  const screenStreamRef = useRef<MediaStream | null>(null)
+
   // Chat and Participants state
   const [messages, setMessages] = useState<SignalRMessage[]>([])
   const [participants, setParticipants] = useState<SignalRParticipant[]>([])
@@ -81,6 +85,7 @@ export default function MeetingPage() {
         })
 
         activeStream = stream
+        cameraStreamRef.current = stream
         setLocalStream(stream)
         setIsInitializingMedia(false)
         console.log("[MeetingPage] Local media stream successfully initialized")
@@ -99,11 +104,14 @@ export default function MeetingPage() {
       if (activeStream) {
         activeStream.getTracks().forEach((track) => track.stop())
       }
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((track) => track.stop())
+      }
     }
   }, [userId])
 
   // 3. WebRTC Stream Engine Hook
-  const { remoteStreams, initiateCall, handleReceiveSignal, handlePeerLeft } = useWebRTCStream({
+  const { remoteStreams, initiateCall, handleReceiveSignal, handlePeerLeft, replaceVideoTrack } = useWebRTCStream({
     meetingId,
     userId,
     username,
@@ -122,7 +130,6 @@ export default function MeetingPage() {
         return [...prev, participant]
       })
       toast.info(`${participant.username} joined the meeting`)
-      // Initiate WebRTC peer connection to newly joined user
       initiateCall(participant.userId, participant.username)
     },
     [initiateCall],
@@ -162,7 +169,28 @@ export default function MeetingPage() {
     [],
   )
 
-  const { isConnected: isSignalRConnected, sendMessage, sendSignal, raiseHand, toggleMediaStatus } = useSignalR({
+  const handleScreenShareChanged = useCallback(
+    (sharerUserId: string | null, isSharing: boolean) => {
+      if (isSharing && sharerUserId && sharerUserId !== userId) {
+        const sharer = participants.find((p) => p.userId === sharerUserId)
+        toast.info(`${sharer?.username || "A participant"} started sharing their screen`)
+      } else if (!isSharing && !isScreenSharing) {
+        toast.info("Screen sharing ended")
+      }
+    },
+    [participants, userId, isScreenSharing],
+  )
+
+  const {
+    isConnected: isSignalRConnected,
+    activeScreenSharerId,
+    startScreenShare,
+    stopScreenShare,
+    sendMessage,
+    sendSignal,
+    raiseHand,
+    toggleMediaStatus,
+  } = useSignalR({
     meetingId,
     userId,
     username,
@@ -171,6 +199,7 @@ export default function MeetingPage() {
     onReceiveMessage: handleReceiveMessage,
     onHandRaised: handleHandRaised,
     onMediaStatusChanged: handleMediaStatusChanged,
+    onScreenShareChanged: handleScreenShareChanged,
     onReceiveSignal: handleReceiveSignal,
   })
 
@@ -226,21 +255,67 @@ export default function MeetingPage() {
     toast.info(nextState ? "Hand raised ✋" : "Hand lowered")
   }
 
+  const stopLocalScreenShare = useCallback(async () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop())
+      screenStreamRef.current = null
+    }
+
+    const cameraTrack = cameraStreamRef.current?.getVideoTracks()[0] || null
+    if (cameraTrack) {
+      await replaceVideoTrack(cameraTrack)
+      if (localStream) {
+        const audioTrack = localStream.getAudioTracks()[0]
+        setLocalStream(new MediaStream([audioTrack, cameraTrack].filter(Boolean)))
+      }
+    }
+
+    setIsScreenSharing(false)
+    await stopScreenShare()
+    toast.info("Screen sharing ended")
+  }, [localStream, replaceVideoTrack, stopScreenShare])
+
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
-      setIsScreenSharing(false)
-      toast.info("Screen sharing ended")
+      await stopLocalScreenShare()
     } else {
+      if (activeScreenSharerId && activeScreenSharerId !== userId) {
+        toast.error("Another participant is already sharing their screen. Only one person may share at a time.")
+        return
+      }
+
+      const res = await startScreenShare()
+      if (!res.success) {
+        toast.error(res.currentSharerName ? `${res.currentSharerName} is already sharing their screen.` : "Screen sharing is currently unavailable.")
+        return
+      }
+
       try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: "always" } as any,
+          audio: false,
+        })
+
+        screenStreamRef.current = screenStream
+        const screenTrack = screenStream.getVideoTracks()[0]
+
+        screenTrack.onended = () => {
+          stopLocalScreenShare()
+        }
+
+        await replaceVideoTrack(screenTrack)
+        if (localStream) {
+          const audioTrack = localStream.getAudioTracks()[0]
+          setLocalStream(new MediaStream([audioTrack, screenTrack].filter(Boolean)))
+        }
+
         setIsScreenSharing(true)
         toast.success("Screen sharing started")
-
-        screenStream.getVideoTracks()[0].onended = () => {
-          setIsScreenSharing(false)
+      } catch (err: any) {
+        await stopScreenShare()
+        if (err.name !== "NotAllowedError") {
+          console.error("Screen share error:", err)
         }
-      } catch {
-        // User cancelled picker
       }
     }
   }
@@ -275,6 +350,9 @@ export default function MeetingPage() {
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop())
     }
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => track.stop())
+    }
     router.push("/dashboard")
   }
 
@@ -301,6 +379,9 @@ export default function MeetingPage() {
       </div>
     )
   }
+
+  const isOtherSharing = !!activeScreenSharerId && activeScreenSharerId !== userId
+  const otherSharerName = participants.find((p) => p.userId === activeScreenSharerId)?.username
 
   return (
     <div ref={containerRef} className="flex flex-col h-screen bg-background text-foreground overflow-hidden select-none">
@@ -359,6 +440,8 @@ export default function MeetingPage() {
         toggleHandRaise={toggleHandRaise}
         isScreenSharing={isScreenSharing}
         toggleScreenShare={toggleScreenShare}
+        isScreenShareDisabled={isOtherSharing}
+        screenShareDisabledReason={isOtherSharing ? `${otherSharerName || "Another participant"} is currently sharing their screen` : undefined}
         isSidebarOpen={isSidebarOpen}
         activeTab={activeTab}
         toggleSidebar={toggleSidebar}

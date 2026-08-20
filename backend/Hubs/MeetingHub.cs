@@ -50,11 +50,14 @@ public class MeetingHub : Hub
         var messages = messagesList
             .Select(m => new { id = m.Id, senderId = m.SenderId, senderName = m.SenderName, content = m.Content, timestamp = m.Timestamp.ToString("o") });
 
+        var activeScreenSharerId = _meetingManager.GetActiveScreenSharer(meetingId);
+
         await Clients.Caller.SendAsync("JoinedMeeting", new
         {
             meetingId,
             participants = existingParticipants,
-            messages
+            messages,
+            activeScreenSharerId
         });
     }
 
@@ -102,6 +105,28 @@ public class MeetingHub : Hub
         });
     }
 
+    public async Task<object> StartScreenShare(string meetingId, string userId)
+    {
+        var success = _meetingManager.TryStartScreenShare(meetingId, userId, out var currentSharerId);
+        if (!success)
+        {
+            var currentSharer = _meetingManager.GetParticipants(meetingId).FirstOrDefault(p => p.UserId == currentSharerId);
+            return new { success = false, currentSharerId, currentSharerName = currentSharer?.Username ?? "Another participant" };
+        }
+
+        await Clients.Group(meetingId).SendAsync("ScreenShareChanged", userId, true);
+        return new { success = true, currentSharerId = userId };
+    }
+
+    public async Task StopScreenShare(string meetingId, string userId)
+    {
+        var stopped = _meetingManager.StopScreenShare(meetingId, userId);
+        if (stopped)
+        {
+            await Clients.Group(meetingId).SendAsync("ScreenShareChanged", (string?)null, false);
+        }
+    }
+
     public async Task SendSignal(string targetUserId, string senderUserId, object signalData)
     {
         await Clients.Group(targetUserId).SendAsync("ReceiveSignal", senderUserId, signalData);
@@ -111,10 +136,15 @@ public class MeetingHub : Hub
     {
         _logger.LogInformation("User {UserId} leaving meeting {MeetingId}", userId, meetingId);
 
+        var wasSharing = _meetingManager.GetActiveScreenSharer(meetingId) == userId;
         _meetingManager.RemoveParticipant(meetingId, userId);
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, meetingId);
 
         await Clients.OthersInGroup(meetingId).SendAsync("UserLeft", userId);
+        if (wasSharing)
+        {
+            await Clients.OthersInGroup(meetingId).SendAsync("ScreenShareChanged", (string?)null, false);
+        }
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
@@ -124,6 +154,7 @@ public class MeetingHub : Hub
         {
             _logger.LogInformation("Connection {ConnectionId} disconnected, removing user {UserId} from {MeetingId}", Context.ConnectionId, userId, meetingId);
             await Clients.OthersInGroup(meetingId).SendAsync("UserLeft", userId);
+            await Clients.OthersInGroup(meetingId).SendAsync("ScreenShareChanged", (string?)null, false);
         }
 
         await base.OnDisconnectedAsync(exception);

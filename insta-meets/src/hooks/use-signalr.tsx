@@ -30,6 +30,7 @@ interface UseSignalRProps {
   onReceiveMessage?: (message: SignalRMessage) => void
   onHandRaised?: (userId: string, isRaised: boolean) => void
   onMediaStatusChanged?: (userId: string, isAudioEnabled: boolean, isVideoEnabled: boolean) => void
+  onScreenShareChanged?: (userId: string | null, isSharing: boolean) => void
   onReceiveSignal?: (senderUserId: string, signalData: any) => void
   backendUrl?: string
 }
@@ -43,11 +44,13 @@ export function useSignalR({
   onReceiveMessage,
   onHandRaised,
   onMediaStatusChanged,
+  onScreenShareChanged,
   onReceiveSignal,
   backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:5000" : "https://video-chat-site.onrender.com"),
 }: UseSignalRProps) {
   const [isConnected, setIsConnected] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [activeScreenSharerId, setActiveScreenSharerId] = useState<string | null>(null)
   const connectionRef = useRef<signalR.HubConnection | null>(null)
 
   // Store callbacks in stable refs to avoid reconnecting on re-renders
@@ -57,6 +60,7 @@ export function useSignalR({
     onReceiveMessage,
     onHandRaised,
     onMediaStatusChanged,
+    onScreenShareChanged,
     onReceiveSignal,
   })
 
@@ -67,6 +71,7 @@ export function useSignalR({
       onReceiveMessage,
       onHandRaised,
       onMediaStatusChanged,
+      onScreenShareChanged,
       onReceiveSignal,
     }
   })
@@ -96,6 +101,10 @@ export function useSignalR({
         data.participants.forEach((p: SignalRParticipant) => {
           if (p.userId !== userId) callbacksRef.current.onUserJoined?.(p)
         })
+      }
+      if (data?.activeScreenSharerId) {
+        setActiveScreenSharerId(data.activeScreenSharerId)
+        callbacksRef.current.onScreenShareChanged?.(data.activeScreenSharerId, true)
       }
     }
 
@@ -130,6 +139,12 @@ export function useSignalR({
       callbacksRef.current.onMediaStatusChanged?.(data.userId, data.isAudioEnabled, data.isVideoEnabled)
     })
 
+    connection.on("ScreenShareChanged", (sharerUserId: string | null, isSharing: boolean) => {
+      console.log(`[SignalR] Screen share changed: sharer=${sharerUserId}, isSharing=${isSharing}`)
+      setActiveScreenSharerId(isSharing ? sharerUserId : null)
+      callbacksRef.current.onScreenShareChanged?.(sharerUserId, isSharing)
+    })
+
     connection.on("ReceiveSignal", (senderUserId: string, signalData: any) => {
       console.log(`[SignalR] Received WebRTC signal from ${senderUserId}:`, signalData?.type || (signalData?.candidate ? "candidate" : "signal"))
       callbacksRef.current.onReceiveSignal?.(senderUserId, signalData)
@@ -161,6 +176,32 @@ export function useSignalR({
       }
     }
   }, [meetingId, userId, backendUrl])
+
+  // Public Methods
+  const startScreenShare = useCallback(async (): Promise<{ success: boolean; currentSharerName?: string }> => {
+    if (!connectionRef.current || !isConnected) {
+      return { success: false }
+    }
+    try {
+      const res: any = await connectionRef.current.invoke("StartScreenShare", meetingId, userId)
+      return {
+        success: !!res?.success,
+        currentSharerName: res?.currentSharerName,
+      }
+    } catch (err) {
+      console.error("[SignalR] Error starting screen share:", err)
+      return { success: false }
+    }
+  }, [meetingId, userId, isConnected])
+
+  const stopScreenShare = useCallback(async () => {
+    if (!connectionRef.current || !isConnected) return
+    try {
+      await connectionRef.current.invoke("StopScreenShare", meetingId, userId)
+    } catch (err) {
+      console.error("[SignalR] Error stopping screen share:", err)
+    }
+  }, [meetingId, userId, isConnected])
 
   // Public Methods
   const sendMessage = useCallback(
@@ -220,6 +261,9 @@ export function useSignalR({
   return {
     isConnected,
     connectionError,
+    activeScreenSharerId,
+    startScreenShare,
+    stopScreenShare,
     sendMessage,
     sendSignal,
     raiseHand,

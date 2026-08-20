@@ -60,14 +60,50 @@ public class MeetingManager
         participants[participant.UserId] = participant;
     }
 
+    private readonly ConcurrentDictionary<string, string> _activeScreenSharers = new();
+
+    public bool TryStartScreenShare(string meetingId, string userId, out string? currentSharerId)
+    {
+        currentSharerId = null;
+        if (_activeScreenSharers.TryGetValue(meetingId, out var existingSharer))
+        {
+            if (existingSharer == userId) return true;
+            currentSharerId = existingSharer;
+            return false;
+        }
+
+        _activeScreenSharers[meetingId] = userId;
+        return true;
+    }
+
+    public bool StopScreenShare(string meetingId, string userId)
+    {
+        if (_activeScreenSharers.TryGetValue(meetingId, out var existingSharer) && existingSharer == userId)
+        {
+            return _activeScreenSharers.TryRemove(meetingId, out _);
+        }
+        return false;
+    }
+
+    public string? GetActiveScreenSharer(string meetingId)
+    {
+        return _activeScreenSharers.TryGetValue(meetingId, out var sharer) ? sharer : null;
+    }
+
     public void RemoveParticipant(string meetingId, string userId)
     {
+        if (_activeScreenSharers.TryGetValue(meetingId, out var sharer) && sharer == userId)
+        {
+            _activeScreenSharers.TryRemove(meetingId, out _);
+        }
+
         if (_meetingParticipants.TryGetValue(meetingId, out var participants))
         {
             participants.TryRemove(userId, out _);
             if (participants.IsEmpty)
             {
                 _meetingParticipants.TryRemove(meetingId, out _);
+                _activeScreenSharers.TryRemove(meetingId, out _);
             }
         }
     }
@@ -85,9 +121,16 @@ public class MeetingManager
                 foundMeetingId = meetingId;
                 foundUserId = match.Key;
                 participants.TryRemove(match.Key, out _);
+
+                if (_activeScreenSharers.TryGetValue(meetingId, out var sharer) && sharer == match.Key)
+                {
+                    _activeScreenSharers.TryRemove(meetingId, out _);
+                }
+
                 if (participants.IsEmpty)
                 {
                     _meetingParticipants.TryRemove(meetingId, out _);
+                    _activeScreenSharers.TryRemove(meetingId, out _);
                 }
                 return;
             }
