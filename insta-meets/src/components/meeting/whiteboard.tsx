@@ -1,13 +1,11 @@
 "use client"
 
-import React, { useState, useCallback, useRef, useEffect } from "react"
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
-  useNodesState,
-  useEdgesState,
   addEdge,
   Connection,
   Edge,
@@ -19,6 +17,10 @@ import {
   ReactFlowProvider,
   useReactFlow,
   MarkerType,
+  applyNodeChanges,
+  applyEdgeChanges,
+  NodeChange,
+  EdgeChange,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
@@ -38,33 +40,54 @@ import {
   Layers,
   Type,
   Trash2,
-  Download,
+  Undo2,
+  Redo2,
   X,
   Sparkles,
-  Zap,
-  LayoutTemplate,
-  Plus,
-  MousePointer2,
+  GripVertical,
+  Minimize2,
+  Maximize2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // -------------------------------------------------------------
-// Custom Node Components
+// Base Delete Button Wrapper for All Nodes
+// -------------------------------------------------------------
+function NodeDeleteButton({ nodeId, onDelete }: { nodeId: string; onDelete?: (id: string) => void }) {
+  if (!onDelete) return null
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        onDelete(nodeId)
+      }}
+      className="absolute -top-2.5 -right-2.5 w-6 h-6 rounded-full bg-destructive text-destructive-foreground shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 hover:scale-110 active:scale-95 transition-all z-30 cursor-pointer border border-white/20"
+      title="Delete Node"
+    >
+      <X className="w-3.5 h-3.5 stroke-[2.5]" />
+    </button>
+  )
+}
+
+// -------------------------------------------------------------
+// Custom Node Components (Pure & Stable)
 // -------------------------------------------------------------
 
 // 1. Sticky Note Node
-function StickyNoteNode({ id, data, selected }: NodeProps) {
-  const [text, setText] = useState((data?.label as string) || "Idea / Note")
+const StickyNoteNode = React.memo(({ id, data, selected }: NodeProps) => {
   const color = (data?.color as string) || "#FEF08A"
+  const label = (data?.label as string) || ""
 
   return (
     <div
       className={cn(
-        "p-4 rounded-2xl shadow-xl border transition-all duration-200 min-w-[200px] min-h-[150px] flex flex-col select-none",
-        selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative p-4 rounded-2xl shadow-xl border transition-all duration-150 min-w-[200px] min-h-[150px] flex flex-col select-none",
+        selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
       style={{ backgroundColor: color, borderColor: `${color}cc`, color: "#0F172A" }}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-slate-800 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-slate-800 !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-slate-800 !border-2 !border-white" />
@@ -75,35 +98,37 @@ function StickyNoteNode({ id, data, selected }: NodeProps) {
           <StickyNote className="w-3.5 h-3.5" />
           <span>Note</span>
         </span>
-        <span className="text-[10px] opacity-70">{data?.author as string || "Participant"}</span>
+        <span className="text-[10px] opacity-70">{(data?.author as string) || "Participant"}</span>
       </div>
 
       <textarea
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value)
-          if (data?.onChange) (data.onChange as (text: string) => void)(e.target.value)
+        defaultValue={label}
+        onBlur={(e) => {
+          if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
         }}
         className="flex-1 w-full bg-transparent resize-none outline-none font-medium text-sm leading-snug"
         placeholder="Write your note..."
       />
     </div>
   )
-}
+})
+StickyNoteNode.displayName = "StickyNoteNode"
 
 // 2. Process / Rectangle Node
-function ProcessNode({ id, data, selected }: NodeProps) {
-  const [title, setTitle] = useState((data?.label as string) || "Process Step")
+const ProcessNode = React.memo(({ id, data, selected }: NodeProps) => {
   const color = (data?.color as string) || "#3B82F6"
+  const label = (data?.label as string) || "Process Step"
 
   return (
     <div
       className={cn(
-        "px-4 py-3 rounded-2xl bg-background/95 backdrop-blur-md border-2 shadow-xl min-w-[210px] transition-all select-none",
-        selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative px-4 py-3 rounded-2xl bg-background/95 backdrop-blur-md border-2 shadow-xl min-w-[210px] transition-all select-none",
+        selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
       style={{ borderColor: color }}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-primary !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-primary !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-primary !border-2 !border-white" />
@@ -112,10 +137,9 @@ function ProcessNode({ id, data, selected }: NodeProps) {
       <div className="flex items-center gap-2 mb-1">
         <Square className="w-4 h-4" style={{ color }} />
         <input
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value)
-            if (data?.onChange) (data.onChange as (text: string) => void)(e.target.value)
+          defaultValue={label}
+          onBlur={(e) => {
+            if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
           }}
           className="bg-transparent font-bold text-sm text-foreground outline-none w-full"
         />
@@ -123,21 +147,24 @@ function ProcessNode({ id, data, selected }: NodeProps) {
       <p className="text-xs text-muted-foreground">Action / Component Step</p>
     </div>
   )
-}
+})
+ProcessNode.displayName = "ProcessNode"
 
 // 3. Circle / Concept Node
-function CircleNode({ id, data, selected }: NodeProps) {
-  const [title, setTitle] = useState((data?.label as string) || "Concept")
+const CircleNode = React.memo(({ id, data, selected }: NodeProps) => {
   const color = (data?.color as string) || "#8B5CF6"
+  const label = (data?.label as string) || "Concept"
 
   return (
     <div
       className={cn(
-        "w-36 h-36 rounded-full bg-purple-500/15 backdrop-blur-md border-2 shadow-xl flex flex-col items-center justify-center p-3 text-center transition-all select-none",
-        selected ? "ring-2 ring-purple-400 ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative w-36 h-36 rounded-full bg-purple-500/15 backdrop-blur-md border-2 shadow-xl flex flex-col items-center justify-center p-3 text-center transition-all select-none",
+        selected ? "ring-2 ring-purple-400 ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
       style={{ borderColor: color }}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-purple-500 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-purple-500 !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-purple-500 !border-2 !border-white" />
@@ -145,28 +172,30 @@ function CircleNode({ id, data, selected }: NodeProps) {
 
       <Circle className="w-4 h-4 text-purple-400 mb-1" />
       <input
-        value={title}
-        onChange={(e) => {
-          setTitle(e.target.value)
-          if (data?.onChange) (data.onChange as (text: string) => void)(e.target.value)
+        defaultValue={label}
+        onBlur={(e) => {
+          if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
         }}
         className="bg-transparent font-bold text-xs text-foreground text-center outline-none w-28"
       />
     </div>
   )
-}
+})
+CircleNode.displayName = "CircleNode"
 
 // 4. Decision Diamond Node
-function DecisionNode({ id, data, selected }: NodeProps) {
-  const [text, setText] = useState((data?.label as string) || "Condition?")
+const DecisionNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "Condition?"
 
   return (
     <div
       className={cn(
-        "w-36 h-36 bg-amber-500/20 backdrop-blur-md border-2 border-amber-500 shadow-xl rounded-2xl flex items-center justify-center p-3 text-center transform rotate-45 transition-all select-none",
-        selected ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative w-36 h-36 bg-amber-500/20 backdrop-blur-md border-2 border-amber-500 shadow-xl rounded-2xl flex items-center justify-center p-3 text-center transform rotate-45 transition-all select-none",
+        selected ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-amber-500 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-amber-500 !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-amber-500 !border-2 !border-white" />
@@ -175,29 +204,31 @@ function DecisionNode({ id, data, selected }: NodeProps) {
       <div className="transform -rotate-45 flex flex-col items-center justify-center">
         <Diamond className="w-4 h-4 text-amber-500 mb-1" />
         <input
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            if (data?.onChange) (data.onChange as (text: string) => void)(e.target.value)
+          defaultValue={label}
+          onBlur={(e) => {
+            if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
           }}
           className="bg-transparent font-bold text-xs text-foreground text-center outline-none w-24"
         />
       </div>
     </div>
   )
-}
+})
+DecisionNode.displayName = "DecisionNode"
 
 // 5. Triangle / Warning Node
-function TriangleNode({ id, data, selected }: NodeProps) {
-  const [text, setText] = useState((data?.label as string) || "Alert / Priority")
+const TriangleNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "Priority / Alert"
 
   return (
     <div
       className={cn(
-        "px-4 py-3 bg-red-500/15 backdrop-blur-md border-2 border-red-500 shadow-xl rounded-2xl min-w-[190px] flex items-center gap-3 transition-all select-none",
-        selected ? "ring-2 ring-red-400 ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative px-4 py-3 bg-red-500/15 backdrop-blur-md border-2 border-red-500 shadow-xl rounded-2xl min-w-[190px] flex items-center gap-3 transition-all select-none",
+        selected ? "ring-2 ring-red-400 ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-red-500 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-red-500 !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-red-500 !border-2 !border-white" />
@@ -206,10 +237,9 @@ function TriangleNode({ id, data, selected }: NodeProps) {
       <Triangle className="w-5 h-5 text-red-500 flex-shrink-0" />
       <div className="flex flex-col w-full">
         <input
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            if (data?.onChange) (data.onChange as (text: string) => void)(e.target.value)
+          defaultValue={label}
+          onBlur={(e) => {
+            if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
           }}
           className="bg-transparent font-bold text-sm text-foreground outline-none w-full"
         />
@@ -217,19 +247,22 @@ function TriangleNode({ id, data, selected }: NodeProps) {
       </div>
     </div>
   )
-}
+})
+TriangleNode.displayName = "TriangleNode"
 
 // 6. Hexagon / Milestone Node
-function HexagonNode({ id, data, selected }: NodeProps) {
-  const [text, setText] = useState((data?.label as string) || "Milestone 1.0")
+const HexagonNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "Milestone 1.0"
 
   return (
     <div
       className={cn(
-        "px-4 py-3 bg-pink-500/15 backdrop-blur-md border-2 border-pink-500 shadow-xl rounded-2xl min-w-[190px] flex items-center gap-3 transition-all select-none",
-        selected ? "ring-2 ring-pink-400 ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative px-4 py-3 bg-pink-500/15 backdrop-blur-md border-2 border-pink-500 shadow-xl rounded-2xl min-w-[190px] flex items-center gap-3 transition-all select-none",
+        selected ? "ring-2 ring-pink-400 ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-pink-500 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-pink-500 !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-pink-500 !border-2 !border-white" />
@@ -238,10 +271,9 @@ function HexagonNode({ id, data, selected }: NodeProps) {
       <Hexagon className="w-5 h-5 text-pink-500 flex-shrink-0" />
       <div className="flex flex-col w-full">
         <input
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            if (data?.onChange) (data.onChange as (text: string) => void)(e.target.value)
+          defaultValue={label}
+          onBlur={(e) => {
+            if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
           }}
           className="bg-transparent font-bold text-sm text-foreground outline-none w-full"
         />
@@ -249,19 +281,22 @@ function HexagonNode({ id, data, selected }: NodeProps) {
       </div>
     </div>
   )
-}
+})
+HexagonNode.displayName = "HexagonNode"
 
 // 7. Database Node
-function DatabaseNode({ id, data, selected }: NodeProps) {
-  const [name, setName] = useState((data?.label as string) || "PostgreSQL DB")
+const DatabaseNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "PostgreSQL DB"
 
   return (
     <div
       className={cn(
-        "px-4 py-3 rounded-2xl bg-emerald-500/15 backdrop-blur-md border-2 border-emerald-500 shadow-xl min-w-[190px] flex items-center gap-3 transition-all select-none",
-        selected ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative px-4 py-3 rounded-2xl bg-emerald-500/15 backdrop-blur-md border-2 border-emerald-500 shadow-xl min-w-[190px] flex items-center gap-3 transition-all select-none",
+        selected ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-emerald-500 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-emerald-500 !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-emerald-500 !border-2 !border-white" />
@@ -270,10 +305,9 @@ function DatabaseNode({ id, data, selected }: NodeProps) {
       <Database className="w-6 h-6 text-emerald-500 flex-shrink-0" />
       <div className="flex flex-col">
         <input
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value)
-            if (data?.onChange) (data.onChange as (text: string) => void)(e.target.value)
+          defaultValue={label}
+          onBlur={(e) => {
+            if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
           }}
           className="bg-transparent font-bold text-sm text-foreground outline-none w-full"
         />
@@ -281,19 +315,22 @@ function DatabaseNode({ id, data, selected }: NodeProps) {
       </div>
     </div>
   )
-}
+})
+DatabaseNode.displayName = "DatabaseNode"
 
 // 8. Cloud Service Node
-function CloudNode({ id, data, selected }: NodeProps) {
-  const [name, setName] = useState((data?.label as string) || "Next.js API Gateway")
+const CloudNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "Next.js API Gateway"
 
   return (
     <div
       className={cn(
-        "px-4 py-3 rounded-2xl bg-indigo-500/15 backdrop-blur-md border-2 border-indigo-500 shadow-xl min-w-[190px] flex items-center gap-3 transition-all select-none",
-        selected ? "ring-2 ring-indigo-400 ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative px-4 py-3 rounded-2xl bg-indigo-500/15 backdrop-blur-md border-2 border-indigo-500 shadow-xl min-w-[190px] flex items-center gap-3 transition-all select-none",
+        selected ? "ring-2 ring-indigo-400 ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-indigo-500 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-indigo-500 !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-indigo-500 !border-2 !border-white" />
@@ -302,10 +339,9 @@ function CloudNode({ id, data, selected }: NodeProps) {
       <Cloud className="w-6 h-6 text-indigo-500 flex-shrink-0" />
       <div className="flex flex-col">
         <input
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value)
-            if (data?.onChange) (data.onChange as (text: string) => void)(e.target.value)
+          defaultValue={label}
+          onBlur={(e) => {
+            if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
           }}
           className="bg-transparent font-bold text-sm text-foreground outline-none w-full"
         />
@@ -313,11 +349,12 @@ function CloudNode({ id, data, selected }: NodeProps) {
       </div>
     </div>
   )
-}
+})
+CloudNode.displayName = "CloudNode"
 
 // 9. Checklist / Task Node
-function ChecklistNode({ id, data, selected }: NodeProps) {
-  const [title, setTitle] = useState((data?.label as string) || "Sprint Tasks")
+const ChecklistNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "Sprint Tasks"
   const [items, setItems] = useState<string[]>([
     "Review system architecture",
     "Run automated test suite",
@@ -327,18 +364,22 @@ function ChecklistNode({ id, data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "p-4 rounded-2xl bg-background/95 backdrop-blur-md border-2 border-teal-500/80 shadow-xl min-w-[240px] flex flex-col transition-all select-none",
-        selected ? "ring-2 ring-teal-400 ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative p-4 rounded-2xl bg-background/95 backdrop-blur-md border-2 border-teal-500/80 shadow-xl min-w-[240px] flex flex-col transition-all select-none",
+        selected ? "ring-2 ring-teal-400 ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-teal-500 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-teal-500 !border-2 !border-white" />
 
       <div className="flex items-center gap-2 pb-2 mb-2 border-b border-border">
         <CheckSquare className="w-4 h-4 text-teal-500" />
         <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          defaultValue={label}
+          onBlur={(e) => {
+            if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
+          }}
           className="bg-transparent font-bold text-sm text-foreground outline-none w-full"
         />
       </div>
@@ -353,19 +394,22 @@ function ChecklistNode({ id, data, selected }: NodeProps) {
       </div>
     </div>
   )
-}
+})
+ChecklistNode.displayName = "ChecklistNode"
 
 // 10. Callout / Speech Bubble Node
-function CalloutNode({ id, data, selected }: NodeProps) {
-  const [text, setText] = useState((data?.label as string) || "Important highlight!")
+const CalloutNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "Important highlight!"
 
   return (
     <div
       className={cn(
-        "px-4 py-3 bg-cyan-500/15 backdrop-blur-md border-2 border-cyan-500 shadow-xl rounded-2xl min-w-[190px] flex items-center gap-3 transition-all select-none",
-        selected ? "ring-2 ring-cyan-400 ring-offset-2 ring-offset-background scale-105" : "hover:shadow-2xl"
+        "group relative px-4 py-3 bg-cyan-500/15 backdrop-blur-md border-2 border-cyan-500 shadow-xl rounded-2xl min-w-[190px] flex items-center gap-3 transition-all select-none",
+        selected ? "ring-2 ring-cyan-400 ring-offset-2 ring-offset-background scale-[1.02]" : "hover:shadow-2xl"
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!w-3.5 !h-3.5 !bg-cyan-500 !border-2 !border-white" />
       <Handle type="source" position={Position.Bottom} className="!w-3.5 !h-3.5 !bg-cyan-500 !border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="!w-3.5 !h-3.5 !bg-cyan-500 !border-2 !border-white" />
@@ -373,61 +417,75 @@ function CalloutNode({ id, data, selected }: NodeProps) {
 
       <MessageCircle className="w-5 h-5 text-cyan-400 flex-shrink-0" />
       <input
-        value={text}
-        onChange={(e) => setText(e.target.value)}
+        defaultValue={label}
+        onBlur={(e) => {
+          if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
+        }}
         className="bg-transparent font-medium text-sm text-foreground outline-none w-full"
       />
     </div>
   )
-}
+})
+CalloutNode.displayName = "CalloutNode"
 
 // 11. Section Group Frame Node
-function GroupFrameNode({ id, data, selected }: NodeProps) {
-  const [title, setTitle] = useState((data?.label as string) || "System Component Group")
+const GroupFrameNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "System Component Group"
 
   return (
     <div
       className={cn(
-        "w-[420px] h-[280px] rounded-3xl border-2 border-dashed border-primary/40 bg-primary/5 p-4 flex flex-col justify-between transition-all select-none pointer-events-auto",
+        "group relative w-[420px] h-[280px] rounded-3xl border-2 border-dashed border-primary/40 bg-primary/5 p-4 flex flex-col justify-between transition-all select-none pointer-events-auto",
         selected ? "border-primary ring-2 ring-primary/30" : ""
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <div className="flex items-center gap-2 font-bold text-xs text-primary uppercase tracking-wider">
         <Layers className="w-4 h-4" />
         <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          defaultValue={label}
+          onBlur={(e) => {
+            if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
+          }}
           className="bg-transparent font-bold outline-none w-full text-primary"
         />
       </div>
       <div className="text-[11px] text-muted-foreground text-right">Container Frame</div>
     </div>
   )
-}
+})
+GroupFrameNode.displayName = "GroupFrameNode"
 
 // 12. Free Text Annotation Node
-function TextNode({ id, data, selected }: NodeProps) {
-  const [text, setText] = useState((data?.label as string) || "Add text annotation")
+const TextNode = React.memo(({ id, data, selected }: NodeProps) => {
+  const label = (data?.label as string) || "Add text annotation"
 
   return (
     <div
       className={cn(
-        "p-2 bg-transparent select-none min-w-[140px]",
+        "group relative p-2 bg-transparent select-none min-w-[140px]",
         selected ? "border border-dashed border-primary rounded-lg ring-2 ring-primary/20" : ""
       )}
     >
+      <NodeDeleteButton nodeId={id} onDelete={data?.onDelete as any} />
+
       <Handle type="target" position={Position.Top} className="!opacity-0" />
       <Handle type="source" position={Position.Bottom} className="!opacity-0" />
       <input
-        value={text}
-        onChange={(e) => setText(e.target.value)}
+        defaultValue={label}
+        onBlur={(e) => {
+          if (data?.onUpdate) (data.onUpdate as any)(id, e.target.value)
+        }}
         className="bg-transparent font-bold text-lg text-foreground outline-none w-full"
       />
     </div>
   )
-}
+})
+TextNode.displayName = "TextNode"
 
-const nodeTypes = {
+// Static NodeTypes Map (Crucial: prevents React Flow re-mount loops)
+const staticNodeTypes = {
   stickyNote: StickyNoteNode,
   process: ProcessNode,
   circle: CircleNode,
@@ -481,6 +539,7 @@ export interface WhiteboardElement {
   id: string
   type: "nodes_update" | "edges_update" | "clear" | "add_node" | "cursor_move"
   payload: any
+  senderId?: string
 }
 
 interface WhiteboardProps {
@@ -503,64 +562,6 @@ const NOTE_COLORS = [
   "#FED7AA", // Orange
 ]
 
-const initialNodes: Node[] = [
-  {
-    id: "node-1",
-    type: "cloud",
-    position: { x: 180, y: 120 },
-    data: { label: "Client Frontend (Next.js)", color: "#6366F1" },
-  },
-  {
-    id: "node-2",
-    type: "process",
-    position: { x: 480, y: 120 },
-    data: { label: ".NET 10 & SignalR Hub", color: "#3B82F6" },
-  },
-  {
-    id: "node-3",
-    type: "database",
-    position: { x: 780, y: 120 },
-    data: { label: "PostgreSQL Database", color: "#10B981" },
-  },
-  {
-    id: "node-4",
-    type: "stickyNote",
-    position: { x: 320, y: 280 },
-    data: { label: "Real-time WebRTC Peer Signaling with Metered TURN", color: "#FEF08A", author: "Host" },
-  },
-  {
-    id: "node-5",
-    type: "checklist",
-    position: { x: 640, y: 270 },
-    data: { label: "Meeting Action Items" },
-  },
-]
-
-const initialEdges: Edge[] = [
-  {
-    id: "e1-2",
-    source: "node-1",
-    target: "node-2",
-    animated: true,
-    style: { stroke: "#6366F1", strokeWidth: 2 },
-    markerEnd: { type: MarkerType.ArrowClosed, color: "#6366F1" },
-  },
-  {
-    id: "e2-3",
-    source: "node-2",
-    target: "node-3",
-    animated: true,
-    style: { stroke: "#10B981", strokeWidth: 2 },
-    markerEnd: { type: MarkerType.ArrowClosed, color: "#10B981" },
-  },
-  {
-    id: "e2-4",
-    source: "node-2",
-    target: "node-4",
-    style: { stroke: "#F59E0B", strokeWidth: 2, strokeDasharray: "5 5" },
-  },
-]
-
 function WhiteboardInner({
   currentUserId,
   currentUsername,
@@ -571,12 +572,95 @@ function WhiteboardInner({
   incomingHistory,
   isBoardCleared,
 }: WhiteboardProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+  // Start with completely blank whiteboard
+  const [nodes, setNodes] = useState<Node[]>([])
+  const [edges, setEdges] = useState<Edge[]>([])
   const [selectedNoteColor, setSelectedNoteColor] = useState(NOTE_COLORS[0])
   const [remoteCursors, setRemoteCursors] = useState<Map<string, RemoteCursor>>(new Map())
+  const [isMinimized, setIsMinimized] = useState(false)
+
+  // Floating Toolbar Position State (Draggable)
+  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number }>({ x: 0, y: 16 })
+  const isDraggingToolbarRef = useRef(false)
+  const dragStartOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
+
+  // Undo / Redo History Stack
+  const historyRef = useRef<{ nodes: Node[]; edges: Edge[] }[]>([{ nodes: [], edges: [] }])
+  const historyIndexRef = useRef<number>(0)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+
   const lastCursorSendRef = useRef<number>(0)
   const reactFlowInstance = useReactFlow()
+
+  // Helper to push state into Undo/Redo history
+  const pushHistory = useCallback((newNodes: Node[], newEdges: Edge[]) => {
+    const nextHistory = historyRef.current.slice(0, historyIndexRef.current + 1)
+    nextHistory.push({ nodes: newNodes, edges: newEdges })
+    historyRef.current = nextHistory
+    historyIndexRef.current = nextHistory.length - 1
+    setCanUndo(historyIndexRef.current > 0)
+    setCanRedo(false)
+  }, [])
+
+  // Node Deletion Handler (passed to all nodes)
+  const handleDeleteNode = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => {
+        const nextNodes = nds.filter((n) => n.id !== nodeId)
+        setEdges((eds) => {
+          const nextEdges = eds.filter((e) => e.source !== nodeId && e.target !== nodeId)
+          pushHistory(nextNodes, nextEdges)
+          onSendStroke({ type: "nodes_update", payload: nextNodes, senderId: currentUserId })
+          onSendStroke({ type: "edges_update", payload: nextEdges, senderId: currentUserId })
+          return nextEdges
+        })
+        return nextNodes
+      })
+    },
+    [currentUserId, onSendStroke, pushHistory]
+  )
+
+  // Node Text Update Handler
+  const handleUpdateNodeText = useCallback(
+    (nodeId: string, text: string) => {
+      setNodes((nds) => {
+        const nextNodes = nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, label: text } } : n))
+        pushHistory(nextNodes, edges)
+        onSendStroke({ type: "nodes_update", payload: nextNodes, senderId: currentUserId })
+        return nextNodes
+      })
+    },
+    [currentUserId, edges, onSendStroke, pushHistory]
+  )
+
+  // Bind node callbacks to nodes array
+  const preparedNodes = useMemo(() => {
+    return nodes.map((n) => ({
+      ...n,
+      data: {
+        ...n.data,
+        onDelete: handleDeleteNode,
+        onUpdate: handleUpdateNodeText,
+      },
+    }))
+  }, [nodes, handleDeleteNode, handleUpdateNodeText])
+
+  // Handle Node Changes (Drag / Selection)
+  const onNodesChange = useCallback((changes: NodeChange<Node>[]) => {
+    setNodes((nds) => applyNodeChanges(changes, nds))
+  }, [])
+
+  // Node Drag Stop (Broadcast final position to network)
+  const onNodeDragStop = useCallback(() => {
+    pushHistory(nodes, edges)
+    onSendStroke({ type: "nodes_update", payload: nodes, senderId: currentUserId })
+  }, [nodes, edges, currentUserId, onSendStroke, pushHistory])
+
+  // Handle Edge Changes
+  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
+    setEdges((eds) => applyEdgeChanges(changes, eds))
+  }, [])
 
   // Handle Connections with Arrows
   const onConnect = useCallback(
@@ -590,17 +674,70 @@ function WhiteboardInner({
       }
       setEdges((eds) => {
         const updated = addEdge<Edge>(newEdge, eds)
-        onSendStroke({ type: "edges_update", payload: updated })
+        pushHistory(nodes, updated)
+        onSendStroke({ type: "edges_update", payload: updated, senderId: currentUserId })
         return updated
       })
     },
-    [setEdges, onSendStroke]
+    [nodes, currentUserId, onSendStroke, pushHistory]
   )
+
+  // Undo Handler
+  const handleUndo = useCallback(() => {
+    if (historyIndexRef.current > 0) {
+      historyIndexRef.current -= 1
+      const state = historyRef.current[historyIndexRef.current]
+      setNodes(state.nodes)
+      setEdges(state.edges)
+      setCanUndo(historyIndexRef.current > 0)
+      setCanRedo(historyIndexRef.current < historyRef.current.length - 1)
+      onSendStroke({ type: "nodes_update", payload: state.nodes, senderId: currentUserId })
+      onSendStroke({ type: "edges_update", payload: state.edges, senderId: currentUserId })
+    }
+  }, [currentUserId, onSendStroke])
+
+  // Redo Handler
+  const handleRedo = useCallback(() => {
+    if (historyIndexRef.current < historyRef.current.length - 1) {
+      historyIndexRef.current += 1
+      const state = historyRef.current[historyIndexRef.current]
+      setNodes(state.nodes)
+      setEdges(state.edges)
+      setCanUndo(historyIndexRef.current > 0)
+      setCanRedo(historyIndexRef.current < historyRef.current.length - 1)
+      onSendStroke({ type: "nodes_update", payload: state.nodes, senderId: currentUserId })
+      onSendStroke({ type: "edges_update", payload: state.edges, senderId: currentUserId })
+    }
+  }, [currentUserId, onSendStroke])
+
+  // Keyboard Shortcuts: Undo (Cmd/Ctrl+Z), Redo (Cmd/Ctrl+Y, Cmd/Ctrl+Shift+Z)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA") {
+        return
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault()
+        if (e.shiftKey) {
+          handleRedo()
+        } else {
+          handleUndo()
+        }
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault()
+        handleRedo()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [handleUndo, handleRedo])
 
   // Handle Pointer Movement to Broadcast Live Cursor
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const now = Date.now()
-    if (now - lastCursorSendRef.current < 40) return // ~25-30fps throttle
+    if (now - lastCursorSendRef.current < 45) return
     lastCursorSendRef.current = now
 
     const flowPos = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY })
@@ -620,6 +757,9 @@ function WhiteboardInner({
   // Handle Incoming Remote Updates (Nodes, Edges, & Live Cursors)
   useEffect(() => {
     if (!incomingStroke) return
+
+    // Ignore self-echo
+    if (incomingStroke.senderId === currentUserId) return
 
     if (incomingStroke.type === "nodes_update" && Array.isArray(incomingStroke.payload)) {
       setNodes(incomingStroke.payload)
@@ -647,7 +787,7 @@ function WhiteboardInner({
         })
       }
     }
-  }, [incomingStroke, currentUserId, setNodes, setEdges])
+  }, [incomingStroke, currentUserId])
 
   // Inactivity cleanup for remote cursors (> 6 seconds)
   useEffect(() => {
@@ -676,15 +816,19 @@ function WhiteboardInner({
       if (last?.nodes) setNodes(last.nodes)
       if (last?.edges) setEdges(last.edges)
     }
-  }, [incomingHistory, setNodes, setEdges])
+  }, [incomingHistory])
 
   // Handle Board Cleared
   useEffect(() => {
     if (isBoardCleared) {
       setNodes([])
       setEdges([])
+      historyRef.current = [{ nodes: [], edges: [] }]
+      historyIndexRef.current = 0
+      setCanUndo(false)
+      setCanRedo(false)
     }
-  }, [isBoardCleared, setNodes, setEdges])
+  }, [isBoardCleared])
 
   // Helper: Add Node to Center of Viewport
   const addNodeToCanvas = (type: string, dataConfig: any) => {
@@ -692,8 +836,8 @@ function WhiteboardInner({
     const { x, y, zoom } = reactFlowInstance.getViewport()
 
     const position = {
-      x: -x / zoom + 200 + Math.random() * 80,
-      y: -y / zoom + 150 + Math.random() * 80,
+      x: -x / zoom + 220 + Math.random() * 60,
+      y: -y / zoom + 160 + Math.random() * 60,
     }
 
     const newNode: Node = {
@@ -708,45 +852,10 @@ function WhiteboardInner({
 
     setNodes((nds) => {
       const next = [...nds, newNode]
-      onSendStroke({ type: "nodes_update", payload: next })
+      pushHistory(next, edges)
+      onSendStroke({ type: "nodes_update", payload: next, senderId: currentUserId })
       return next
     })
-  }
-
-  // Load Quick Architecture Template
-  const loadArchitectureTemplate = () => {
-    setNodes(initialNodes)
-    setEdges(initialEdges)
-    onSendStroke({ type: "nodes_update", payload: initialNodes })
-    onSendStroke({ type: "edges_update", payload: initialEdges })
-  }
-
-  // Load Sprint Retrospective Template
-  const loadRetroTemplate = () => {
-    const retroNodes: Node[] = [
-      {
-        id: "retro-1",
-        type: "stickyNote",
-        position: { x: 150, y: 120 },
-        data: { label: "What went well? 🚀\n- Fast video connection\n- Great collaboration", color: "#BBF7D0", author: "Team" },
-      },
-      {
-        id: "retro-2",
-        type: "stickyNote",
-        position: { x: 450, y: 120 },
-        data: { label: "What can be improved? 🤔\n- Mobile responsive toolbar\n- More diagram templates", color: "#FBCFE8", author: "Team" },
-      },
-      {
-        id: "retro-3",
-        type: "checklist",
-        position: { x: 750, y: 120 },
-        data: { label: "Action Items 🎯" },
-      },
-    ]
-    setNodes(retroNodes)
-    setEdges([])
-    onSendStroke({ type: "nodes_update", payload: retroNodes })
-    onSendStroke({ type: "edges_update", payload: [] })
   }
 
   // Clear Canvas
@@ -754,9 +863,39 @@ function WhiteboardInner({
     if (confirm("Are you sure you want to clear the entire whiteboard for all participants?")) {
       setNodes([])
       setEdges([])
+      pushHistory([], [])
       onClearBoard()
     }
   }
+
+  // Draggable Toolbar Event Listeners
+  const startDragToolbar = (e: React.PointerEvent) => {
+    isDraggingToolbarRef.current = true
+    dragStartOffsetRef.current = {
+      x: e.clientX - toolbarPos.x,
+      y: e.clientY - toolbarPos.y,
+    }
+  }
+
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      if (isDraggingToolbarRef.current) {
+        setToolbarPos({
+          x: e.clientX - dragStartOffsetRef.current.x,
+          y: Math.max(10, e.clientY - dragStartOffsetRef.current.y),
+        })
+      }
+    }
+    const onPointerUp = () => {
+      isDraggingToolbarRef.current = false
+    }
+    window.addEventListener("pointermove", onPointerMove)
+    window.addEventListener("pointerup", onPointerUp)
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove)
+      window.removeEventListener("pointerup", onPointerUp)
+    }
+  }, [toolbarPos])
 
   const cursorList = Array.from(remoteCursors.values())
 
@@ -765,329 +904,377 @@ function WhiteboardInner({
       className="relative w-full h-full flex flex-col bg-slate-950 overflow-hidden select-none"
       onPointerMove={handlePointerMove}
     >
-      {/* 1. Floating Top Glass Toolbar */}
-      <header className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex flex-wrap items-center justify-center gap-2 p-2 rounded-2xl bg-background/85 backdrop-blur-xl border border-border shadow-2xl transition-all max-w-[95vw]">
-        {/* Node Creation Tools Group */}
-        <div className="flex items-center gap-1 border-r border-border pr-2 flex-wrap">
-          {/* Sticky Note */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("stickyNote", { label: "New Note", color: selectedNoteColor })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-yellow-400/10 border-yellow-500/30 text-yellow-500 hover:bg-yellow-400/20"
-                >
-                  <StickyNote className="w-4 h-4" />
-                  <span>Note</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Sticky Note</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Process Step */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("process", { label: "Process Step", color: "#3B82F6" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-blue-500/10 border-blue-500/30 text-blue-500 hover:bg-blue-500/20"
-                >
-                  <Square className="w-4 h-4" />
-                  <span>Box</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Rectangle / Card</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Circle / Concept */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("circle", { label: "Concept Node", color: "#8B5CF6" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20"
-                >
-                  <Circle className="w-4 h-4" />
-                  <span>Circle</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Circle / Concept</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Decision */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("decision", { label: "Condition?" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-amber-500/10 border-amber-500/30 text-amber-500 hover:bg-amber-500/20"
-                >
-                  <Diamond className="w-4 h-4" />
-                  <span>Diamond</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Decision Diamond</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Triangle Warning */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("triangle", { label: "Priority / Alert" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20"
-                >
-                  <Triangle className="w-4 h-4" />
-                  <span>Alert</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Priority / Alert</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Hexagon Milestone */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("hexagon", { label: "Goal Milestone" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-pink-500/10 border-pink-500/30 text-pink-400 hover:bg-pink-500/20"
-                >
-                  <Hexagon className="w-4 h-4" />
-                  <span>Goal</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Milestone Goal</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Database */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("database", { label: "Database Store" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20"
-                >
-                  <Database className="w-4 h-4" />
-                  <span>DB</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Database Cylinder</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Cloud */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("cloud", { label: "Cloud API" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20"
-                >
-                  <Cloud className="w-4 h-4" />
-                  <span>Cloud</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Cloud Service</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Checklist */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("checklist", { label: "Tasks" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-teal-500/10 border-teal-500/30 text-teal-400 hover:bg-teal-500/20"
-                >
-                  <CheckSquare className="w-4 h-4" />
-                  <span>Tasks</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Task Checklist</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Callout */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("callout", { label: "Note callout" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  <span>Callout</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Speech Callout</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Group Frame */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("groupFrame", { label: "Component Group" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9"
-                >
-                  <Layers className="w-4 h-4" />
-                  <span>Frame</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Section Container Frame</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Text Annotation */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNodeToCanvas("text", { label: "Text Label" })}
-                  className="rounded-xl gap-1.5 font-semibold text-xs h-9"
-                >
-                  <Type className="w-4 h-4" />
-                  <span>Text</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Text Label</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+      {/* 1. Movable & Minimizable Floating Glass Toolbar */}
+      <header
+        className="absolute z-20 flex items-center gap-2 p-2 rounded-2xl bg-background/90 backdrop-blur-2xl border border-border shadow-2xl transition-all"
+        style={{
+          left: `calc(50% + ${toolbarPos.x}px)`,
+          top: `${toolbarPos.y}px`,
+          transform: "translateX(-50%)",
+        }}
+      >
+        {/* Drag Handle */}
+        <div
+          onPointerDown={startDragToolbar}
+          className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+          title="Drag to reposition toolbar"
+        >
+          <GripVertical className="w-4 h-4" />
         </div>
 
-        {/* Note Color Selector */}
-        <div className="flex items-center gap-1.5 border-r border-border pr-2">
-          {NOTE_COLORS.map((c) => (
-            <button
-              key={c}
-              onClick={() => setSelectedNoteColor(c)}
-              className={cn(
-                "w-5 h-5 rounded-full border border-border/60 transition-transform",
-                selectedNoteColor === c ? "scale-125 ring-2 ring-primary ring-offset-2 ring-offset-background" : "hover:scale-110"
-              )}
-              style={{ backgroundColor: c }}
-            />
-          ))}
-        </div>
+        {/* Minimized Pill View */}
+        {isMinimized ? (
+          <div className="flex items-center gap-2 pr-1">
+            <span className="text-xs font-bold text-foreground pl-1 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-primary" />
+              <span>Whiteboard</span>
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsMinimized(false)}
+              className="rounded-xl h-8 w-8 text-muted-foreground hover:text-foreground"
+              title="Expand toolbar"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <>
+            {/* Undo / Redo Group */}
+            <div className="flex items-center gap-1 border-r border-border pr-2">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={!canUndo}
+                      onClick={handleUndo}
+                      className="rounded-xl h-9 w-9 text-foreground disabled:opacity-40"
+                    >
+                      <Undo2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Undo (Ctrl+Z)</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
 
-        {/* Quick Templates */}
-        <div className="flex items-center gap-1 border-r border-border pr-2">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={loadArchitectureTemplate}
-                  className="rounded-xl gap-1.5 text-xs h-9 text-muted-foreground hover:text-foreground"
-                >
-                  <LayoutTemplate className="w-3.5 h-3.5 text-primary" />
-                  <span>Arch</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Load Architecture Template</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={!canRedo}
+                      onClick={handleRedo}
+                      className="rounded-xl h-9 w-9 text-foreground disabled:opacity-40"
+                    >
+                      <Redo2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Redo (Ctrl+Y)</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
 
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={loadRetroTemplate}
-                  className="rounded-xl gap-1.5 text-xs h-9 text-muted-foreground hover:text-foreground"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Retro</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Load Sprint Retro Template</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+            {/* Node Creation Tools Group */}
+            <div className="flex items-center gap-1 border-r border-border pr-2 flex-wrap">
+              {/* Sticky Note */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("stickyNote", { label: "New Note", color: selectedNoteColor })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-yellow-400/10 border-yellow-500/30 text-yellow-500 hover:bg-yellow-400/20"
+                    >
+                      <StickyNote className="w-4 h-4" />
+                      <span>Note</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Sticky Note</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
 
-        {/* Actions: Clear, Close */}
-        <div className="flex items-center gap-1">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleClear}
-                  className="rounded-xl h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Clear Whiteboard</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+              {/* Process Step */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("process", { label: "Process Step", color: "#3B82F6" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-blue-500/10 border-blue-500/30 text-blue-500 hover:bg-blue-500/20"
+                    >
+                      <Square className="w-4 h-4" />
+                      <span>Box</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Rectangle / Card</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
 
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  onClick={onClose}
-                  className="rounded-xl h-9 w-9 ml-1"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Exit Whiteboard</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+              {/* Circle / Concept */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("circle", { label: "Concept Node", color: "#8B5CF6" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20"
+                    >
+                      <Circle className="w-4 h-4" />
+                      <span>Circle</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Circle / Concept</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Decision */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("decision", { label: "Condition?" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-amber-500/10 border-amber-500/30 text-amber-500 hover:bg-amber-500/20"
+                    >
+                      <Diamond className="w-4 h-4" />
+                      <span>Diamond</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Decision Diamond</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Triangle Warning */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("triangle", { label: "Priority / Alert" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20"
+                    >
+                      <Triangle className="w-4 h-4" />
+                      <span>Alert</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Priority / Alert</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Hexagon Milestone */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("hexagon", { label: "Goal Milestone" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-pink-500/10 border-pink-500/30 text-pink-400 hover:bg-pink-500/20"
+                    >
+                      <Hexagon className="w-4 h-4" />
+                      <span>Goal</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Milestone Goal</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Database */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("database", { label: "Database Store" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20"
+                    >
+                      <Database className="w-4 h-4" />
+                      <span>DB</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Database Cylinder</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Cloud */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("cloud", { label: "Cloud API" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20"
+                    >
+                      <Cloud className="w-4 h-4" />
+                      <span>Cloud</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Cloud Service</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Checklist */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("checklist", { label: "Tasks" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-teal-500/10 border-teal-500/30 text-teal-400 hover:bg-teal-500/20"
+                    >
+                      <CheckSquare className="w-4 h-4" />
+                      <span>Tasks</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Task Checklist</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Callout */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("callout", { label: "Note callout" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9 bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>Callout</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Speech Callout</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Group Frame */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("groupFrame", { label: "Component Group" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9"
+                    >
+                      <Layers className="w-4 h-4" />
+                      <span>Frame</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Section Container Frame</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Text Annotation */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNodeToCanvas("text", { label: "Text Label" })}
+                      className="rounded-xl gap-1.5 font-semibold text-xs h-9"
+                    >
+                      <Type className="w-4 h-4" />
+                      <span>Text</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Text Label</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+
+            {/* Note Color Selector */}
+            <div className="flex items-center gap-1.5 border-r border-border pr-2">
+              {NOTE_COLORS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setSelectedNoteColor(c)}
+                  className={cn(
+                    "w-5 h-5 rounded-full border border-border/60 transition-transform",
+                    selectedNoteColor === c ? "scale-125 ring-2 ring-primary ring-offset-2 ring-offset-background" : "hover:scale-110"
+                  )}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+
+            {/* Actions: Minimize, Clear, Close */}
+            <div className="flex items-center gap-1">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsMinimized(true)}
+                      className="rounded-xl h-9 w-9 text-muted-foreground hover:text-foreground"
+                    >
+                      <Minimize2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Minimize Toolbar</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleClear}
+                      className="rounded-xl h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Clear Whiteboard</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      onClick={onClose}
+                      className="rounded-xl h-9 w-9 ml-1"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Exit Whiteboard</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          </>
+        )}
       </header>
 
       {/* 2. Interactive React Flow Canvas */}
       <div className="flex-1 w-full h-full relative">
         <ReactFlow
-          nodes={nodes}
+          nodes={preparedNodes}
           edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={(changes) => {
-            onNodesChange(changes)
-            onSendStroke({ type: "nodes_update", payload: nodes })
-          }}
-          onEdgesChange={(changes) => {
-            onEdgesChange(changes)
-            onSendStroke({ type: "edges_update", payload: edges })
-          }}
+          nodeTypes={staticNodeTypes}
+          onNodesChange={onNodesChange}
+          onNodeDragStop={onNodeDragStop}
+          onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           fitView
           colorMode="dark"
