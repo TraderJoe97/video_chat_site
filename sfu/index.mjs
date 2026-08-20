@@ -340,12 +340,27 @@ io.on("connection", (socket) => {
       if (!consumer) throw new Error(`Consumer ${consumerId} not found`)
 
       await consumer.resume()
-      console.log(`[SFU] Consumer ${consumerId} resumed`)
+      if (consumer.kind === "video") {
+        await consumer.requestKeyFrame().catch((err) => {
+          console.warn(`[SFU] requestKeyFrame error: ${err.message}`)
+        })
+      }
+      console.log(`[SFU] Consumer ${consumerId} resumed (${consumer.kind}) with keyframe request`)
 
-      callback({ resumed: true })
+      if (callback) callback({ resumed: true })
     } catch (error) {
       console.error("[SFU] Error in resume-consumer:", error)
-      callback({ error: error.message })
+      if (callback) callback({ error: error.message })
+    }
+  })
+
+  // 6b. Request Key Frame
+  socket.on("request-key-frame", async ({ consumerId }) => {
+    const peer = peers.get(socket.id)
+    const consumer = peer?.consumers.get(consumerId)
+    if (consumer && consumer.kind === "video") {
+      await consumer.requestKeyFrame().catch(() => {})
+      console.log(`[SFU] Keyframe requested for video consumer ${consumerId}`)
     }
   })
 

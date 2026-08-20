@@ -320,6 +320,13 @@ export function useMediasoup({
             console.log(`[Mediasoup] Consumer ${consumer.id} resumed (${consumer.kind})`)
           })
 
+          // For video consumers, request keyframe to trigger immediate frame rendering
+          if (consumer.kind === "video") {
+            socket.emit("request-key-frame", { consumerId: consumer.id })
+            setTimeout(() => socket.emit("request-key-frame", { consumerId: consumer.id }), 600)
+            setTimeout(() => socket.emit("request-key-frame", { consumerId: consumer.id }), 1800)
+          }
+
           // Add track to participant's MediaStream
           const remoteUserId = producerData.producerUserId
           setRemoteStreams((prev) => {
@@ -386,11 +393,6 @@ export function useMediasoup({
       if (videoTrack && !videoProducerRef.current) {
         const videoProducer = await transport.produce({
           track: videoTrack,
-          encodings: [
-            { maxBitrate: 100000, scaleResolutionDownBy: 4 },
-            { maxBitrate: 300000, scaleResolutionDownBy: 2 },
-            { maxBitrate: 900000 },
-          ],
           codecOptions: {
             videoGoogleStartBitrate: 1000,
           },
