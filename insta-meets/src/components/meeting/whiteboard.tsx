@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef } from "react"
 import dynamic from "next/dynamic"
+import "@excalidraw/excalidraw/index.css"
 import { Button } from "@/components/ui/button"
 import { X } from "lucide-react"
 
@@ -118,7 +119,7 @@ export function Whiteboard({
   }, [isBoardCleared])
 
   return (
-    <div className="relative w-full h-full flex flex-col bg-slate-950 overflow-hidden select-none">
+    <div className="relative w-full h-full flex flex-col bg-slate-950 overflow-hidden select-none" style={{ width: "100%", height: "100%" }}>
       {/* Floating Exit Button */}
       <div className="absolute top-3.5 right-3.5 z-50">
         <Button
@@ -132,8 +133,8 @@ export function Whiteboard({
         </Button>
       </div>
 
-      {/* 100% Free & Open-Source (MIT) Excalidraw Collaborative Canvas */}
-      <div className="flex-1 w-full h-full">
+      {/* Excalidraw Collaborative Canvas with styles loaded */}
+      <div className="flex-1 w-full h-full relative" style={{ width: "100%", height: "100%" }}>
         <Excalidraw
           excalidrawAPI={(api) => {
             excalidrawApiRef.current = api
