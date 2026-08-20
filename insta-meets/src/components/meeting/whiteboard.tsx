@@ -6,6 +6,7 @@ import { reconcileElements } from "@excalidraw/excalidraw"
 import "@excalidraw/excalidraw/index.css"
 import { Button } from "@/components/ui/button"
 import { X } from "lucide-react"
+import { DEFAULT_LIBRARY_ITEMS } from "@/lib/whiteboard-libraries"
 
 // Dynamically import Excalidraw for client-only rendering
 const Excalidraw = dynamic(
@@ -160,7 +161,6 @@ export function Whiteboard({
   useEffect(() => {
     const interval = setInterval(() => {
       if (collaboratorsMapRef.current.size > 0 && excalidrawApiRef.current) {
-        // Excalidraw handles pointer expiration, refresh map
         excalidrawApiRef.current.updateScene({
           collaborators: new Map(collaboratorsMapRef.current),
         })
@@ -200,11 +200,14 @@ export function Whiteboard({
 
   return (
     <div className="relative w-full h-full flex flex-col bg-slate-950 overflow-hidden select-none" style={{ width: "100%", height: "100%" }}>
-      {/* Excalidraw Collaborative Canvas with Reconciler & Cursors */}
+      {/* Excalidraw Collaborative Canvas with Reconciler, Cursors & Libraries */}
       <div className="flex-1 w-full h-full relative" style={{ width: "100%", height: "100%" }}>
         <Excalidraw
           excalidrawAPI={(api) => {
             excalidrawApiRef.current = api
+          }}
+          initialData={{
+            libraryItems: DEFAULT_LIBRARY_ITEMS as any,
           }}
           onChange={handleChange}
           onPointerUpdate={handlePointerUpdate}
