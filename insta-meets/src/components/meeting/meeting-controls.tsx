@@ -1,8 +1,6 @@
-"use client"
-
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Hand, MessageSquare, Mic, MicOff, PhoneOff, Share2, Users, Video, VideoOff } from "lucide-react"
+import { Hand, MessageSquare, Mic, MicOff, PhoneOff, Presentation, Share2, Users, Video, VideoOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface MeetingControlsProps {
@@ -16,6 +14,8 @@ interface MeetingControlsProps {
   toggleScreenShare?: () => void
   isScreenShareDisabled?: boolean
   screenShareDisabledReason?: string
+  isWhiteboardOpen?: boolean
+  toggleWhiteboard?: () => void
   isSidebarOpen?: boolean
   activeTab?: string
   toggleSidebar?: (tab: string) => void
@@ -35,6 +35,8 @@ export function MeetingControls({
   toggleScreenShare,
   isScreenShareDisabled = false,
   screenShareDisabledReason,
+  isWhiteboardOpen = false,
+  toggleWhiteboard,
   isSidebarOpen = false,
   activeTab = "chat",
   toggleSidebar,
@@ -112,6 +114,30 @@ export function MeetingControls({
               </TooltipTrigger>
               <TooltipContent side="top">
                 {isScreenSharing ? "Stop Sharing Screen" : (isScreenShareDisabled ? (screenShareDisabledReason || "Another participant is sharing their screen") : "Share Screen")}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+
+        {/* Whiteboard Mode Toggle */}
+        {toggleWhiteboard && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={isWhiteboardOpen ? "default" : "outline"}
+                  size="icon"
+                  onClick={toggleWhiteboard}
+                  className={cn(
+                    "rounded-xl h-11 w-11 transition-all duration-200",
+                    isWhiteboardOpen ? "bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg shadow-indigo-500/20" : ""
+                  )}
+                >
+                  <Presentation className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {isWhiteboardOpen ? "Close Whiteboard" : "Open Whiteboard"}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

@@ -71,10 +71,10 @@ export default function ChatPanel({
   }
 
   return (
-    <div className="flex flex-col h-full bg-background text-foreground">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+    <div className="flex flex-col h-full min-h-0 w-full bg-background text-foreground overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm text-center">
             No messages yet. Say hello! 👋
           </div>
         ) : (
@@ -89,7 +89,7 @@ export default function ChatPanel({
                   <span className="text-[11px] text-muted-foreground">{formatTime(msg.timestamp)}</span>
                 </div>
                 <div
-                  className={`mt-1 text-sm rounded-lg px-3 py-2 max-w-[85%] break-words ${
+                  className={`mt-1 text-sm rounded-xl px-3 py-2 max-w-[85%] break-words ${
                     isMe
                       ? "bg-primary text-primary-foreground self-start rounded-tl-none"
                       : "bg-muted text-foreground self-start rounded-tl-none"
@@ -103,15 +103,15 @@ export default function ChatPanel({
         )}
         <div ref={messagesEndRef} />
       </div>
-      <div className="p-3 border-t border-border bg-background">
+      <div className="p-3 border-t border-border bg-background flex-shrink-0">
         <form onSubmit={handleSendMessage} className="flex gap-2">
           <Input
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Type a message..."
-            className="flex-1 text-sm bg-muted/50"
+            className="flex-1 text-sm bg-muted/50 rounded-xl"
           />
-          <Button type="submit" size="icon" disabled={!message.trim()} className="h-9 w-9">
+          <Button type="submit" size="icon" disabled={!message.trim()} className="h-9 w-9 rounded-xl">
             <Send className="h-4 w-4" />
           </Button>
         </form>

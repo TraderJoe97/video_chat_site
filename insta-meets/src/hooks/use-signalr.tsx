@@ -32,6 +32,10 @@ interface UseSignalRProps {
   onMediaStatusChanged?: (userId: string, isAudioEnabled: boolean, isVideoEnabled: boolean) => void
   onScreenShareChanged?: (userId: string | null, isSharing: boolean) => void
   onReceiveSignal?: (senderUserId: string, signalData: any) => void
+  onReceiveWhiteboardStroke?: (strokeData: any) => void
+  onWhiteboardCleared?: () => void
+  onWhiteboardToggled?: (isOpen: boolean) => void
+  onReceiveWhiteboardHistory?: (strokes: any[]) => void
   backendUrl?: string
 }
 
@@ -46,6 +50,10 @@ export function useSignalR({
   onMediaStatusChanged,
   onScreenShareChanged,
   onReceiveSignal,
+  onReceiveWhiteboardStroke,
+  onWhiteboardCleared,
+  onWhiteboardToggled,
+  onReceiveWhiteboardHistory,
   backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:5000" : "https://video-chat-site.onrender.com"),
 }: UseSignalRProps) {
   const [isConnected, setIsConnected] = useState(false)
@@ -62,6 +70,10 @@ export function useSignalR({
     onMediaStatusChanged,
     onScreenShareChanged,
     onReceiveSignal,
+    onReceiveWhiteboardStroke,
+    onWhiteboardCleared,
+    onWhiteboardToggled,
+    onReceiveWhiteboardHistory,
   })
 
   useEffect(() => {
@@ -73,6 +85,10 @@ export function useSignalR({
       onMediaStatusChanged,
       onScreenShareChanged,
       onReceiveSignal,
+      onReceiveWhiteboardStroke,
+      onWhiteboardCleared,
+      onWhiteboardToggled,
+      onReceiveWhiteboardHistory,
     }
   })
 
@@ -150,6 +166,23 @@ export function useSignalR({
       callbacksRef.current.onReceiveSignal?.(senderUserId, signalData)
     })
 
+    // Whiteboard Real-Time Events
+    connection.on("ReceiveWhiteboardStroke", (strokeData: any) => {
+      callbacksRef.current.onReceiveWhiteboardStroke?.(strokeData)
+    })
+
+    connection.on("WhiteboardCleared", () => {
+      callbacksRef.current.onWhiteboardCleared?.()
+    })
+
+    connection.on("WhiteboardToggled", (isOpen: boolean) => {
+      callbacksRef.current.onWhiteboardToggled?.(isOpen)
+    })
+
+    connection.on("ReceiveWhiteboardHistory", (history: any[]) => {
+      callbacksRef.current.onReceiveWhiteboardHistory?.(history || [])
+    })
+
     // Start connection
     const startConnection = async () => {
       try {
@@ -203,7 +236,48 @@ export function useSignalR({
     }
   }, [meetingId, userId, isConnected])
 
-  // Public Methods
+  const sendWhiteboardStroke = useCallback(
+    async (strokeData: any) => {
+      if (!connectionRef.current || !isConnected) return
+      try {
+        await connectionRef.current.invoke("SendWhiteboardStroke", meetingId, strokeData)
+      } catch (err) {
+        console.error("[SignalR] Error sending whiteboard stroke:", err)
+      }
+    },
+    [meetingId, isConnected],
+  )
+
+  const clearWhiteboard = useCallback(async () => {
+    if (!connectionRef.current || !isConnected) return
+    try {
+      await connectionRef.current.invoke("ClearWhiteboard", meetingId)
+    } catch (err) {
+      console.error("[SignalR] Error clearing whiteboard:", err)
+    }
+  }, [meetingId, isConnected])
+
+  const toggleWhiteboardMode = useCallback(
+    async (isOpen: boolean) => {
+      if (!connectionRef.current || !isConnected) return
+      try {
+        await connectionRef.current.invoke("ToggleWhiteboardMode", meetingId, isOpen)
+      } catch (err) {
+        console.error("[SignalR] Error toggling whiteboard mode:", err)
+      }
+    },
+    [meetingId, isConnected],
+  )
+
+  const requestWhiteboardHistory = useCallback(async () => {
+    if (!connectionRef.current || !isConnected) return
+    try {
+      await connectionRef.current.invoke("RequestWhiteboardHistory", meetingId)
+    } catch (err) {
+      console.error("[SignalR] Error requesting whiteboard history:", err)
+    }
+  }, [meetingId, isConnected])
+
   const sendMessage = useCallback(
     async (content: string) => {
       if (!connectionRef.current || !isConnected) {
@@ -264,6 +338,10 @@ export function useSignalR({
     activeScreenSharerId,
     startScreenShare,
     stopScreenShare,
+    sendWhiteboardStroke,
+    clearWhiteboard,
+    toggleWhiteboardMode,
+    requestWhiteboardHistory,
     sendMessage,
     sendSignal,
     raiseHand,

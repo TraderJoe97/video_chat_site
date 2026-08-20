@@ -144,6 +144,44 @@ public class MeetingManager
             : Enumerable.Empty<Participant>();
     }
 
+    private readonly ConcurrentDictionary<string, List<object>> _whiteboardStrokes = new();
+
+    public void AddWhiteboardStroke(string meetingId, object stroke)
+    {
+        var strokes = _whiteboardStrokes.GetOrAdd(meetingId, _ => new List<object>());
+        lock (strokes)
+        {
+            strokes.Add(stroke);
+            if (strokes.Count > 5000)
+            {
+                strokes.RemoveRange(0, 1000);
+            }
+        }
+    }
+
+    public void ClearWhiteboard(string meetingId)
+    {
+        if (_whiteboardStrokes.TryGetValue(meetingId, out var strokes))
+        {
+            lock (strokes)
+            {
+                strokes.Clear();
+            }
+        }
+    }
+
+    public IEnumerable<object> GetWhiteboardStrokes(string meetingId)
+    {
+        if (_whiteboardStrokes.TryGetValue(meetingId, out var strokes))
+        {
+            lock (strokes)
+            {
+                return strokes.ToList();
+            }
+        }
+        return Enumerable.Empty<object>();
+    }
+
     public async Task AddMessageAsync(string meetingId, ChatMessage message)
     {
         var messages = _meetingMessages.GetOrAdd(meetingId, _ => new List<ChatMessage>());

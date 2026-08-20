@@ -33,9 +33,9 @@ export function MeetingSidebar({
   onSendMessage,
 }: MeetingSidebarProps) {
   return (
-    <div className="w-full h-full flex flex-col bg-background text-foreground border-l border-border shadow-lg">
-      <Tabs defaultValue="chat" value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-        <div className="p-3 border-b border-border">
+    <div className="w-full h-full flex flex-col min-h-0 bg-background text-foreground border-l border-border shadow-2xl overflow-hidden">
+      <Tabs defaultValue="chat" value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 h-full overflow-hidden">
+        <div className="p-3 border-b border-border flex-shrink-0">
           <TabsList className="grid grid-cols-2 bg-muted p-1 rounded-lg">
             <TabsTrigger
               value="chat"
@@ -54,7 +54,7 @@ export function MeetingSidebar({
           </TabsList>
         </div>
 
-        <TabsContent value="chat" className="flex-1 flex flex-col m-0 overflow-hidden">
+        <TabsContent value="chat" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
           <ChatPanel
             messages={messages}
             participants={participants}
@@ -64,7 +64,7 @@ export function MeetingSidebar({
           />
         </TabsContent>
 
-        <TabsContent value="participants" className="flex-1 m-0 overflow-hidden">
+        <TabsContent value="participants" className="flex-1 m-0 min-h-0 overflow-hidden">
           <ParticipantsPanel participants={participants} />
         </TabsContent>
       </Tabs>

@@ -17,6 +17,7 @@ interface PeerState {
   ignoreOffer: boolean
   isPolite: boolean
   pendingCandidates: RTCIceCandidateInit[]
+  screenSender?: RTCRtpSender
 }
 
 interface UseWebRTCStreamProps {
@@ -37,9 +38,11 @@ export function useWebRTCStream({
   sendSignal,
 }: UseWebRTCStreamProps) {
   const [remoteStreams, setRemoteStreams] = useState<Map<string, RemoteParticipantStream>>(new Map())
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState<Map<string, MediaStream>>(new Map())
   const peersRef = useRef<Map<string, PeerState>>(new Map())
   const iceServersRef = useRef<RTCIceServer[]>([])
   const localStreamRef = useRef<MediaStream | null>(null)
+  const localScreenStreamRef = useRef<MediaStream | null>(null)
   const isMountedRef = useRef(true)
 
   localStreamRef.current = localStream
@@ -87,7 +90,7 @@ export function useWebRTCStream({
         pendingCandidates: [],
       }
 
-      // 1. Add Local Tracks
+      // 1. Add Local Camera/Audio Tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
           pc.addTrack(track, localStreamRef.current!)
@@ -95,7 +98,17 @@ export function useWebRTCStream({
         })
       }
 
-      // 2. Perfect Negotiation: onnegotiationneeded
+      // 2. Add Local Screen Share Track (if active)
+      if (localScreenStreamRef.current) {
+        const screenTrack = localScreenStreamRef.current.getVideoTracks()[0]
+        if (screenTrack) {
+          const sender = pc.addTrack(screenTrack, localScreenStreamRef.current)
+          peerState.screenSender = sender
+          console.log(`[WebRTC] Added screen share track to peer ${peerUserId}`)
+        }
+      }
+
+      // 3. Perfect Negotiation: onnegotiationneeded
       pc.onnegotiationneeded = async () => {
         try {
           peerState.isMakingOffer = true
@@ -113,7 +126,7 @@ export function useWebRTCStream({
         }
       }
 
-      // 3. ICE Candidate Dispatch
+      // 4. ICE Candidate Dispatch
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           sendSignal(peerUserId, {
@@ -123,15 +136,26 @@ export function useWebRTCStream({
         }
       }
 
-      // 4. Remote Media Track Ingestion
+      // 5. Remote Media Track Ingestion
       pc.ontrack = (event) => {
-        console.log(`[WebRTC] Received remote track (${event.track.kind}) from ${peerUserId}`)
+        console.log(`[WebRTC] Received remote track (${event.track.kind}) from ${peerUserId}, streams: ${event.streams.length}`)
         const [incomingStream] = event.streams
         const track = event.track
 
         setRemoteStreams((prev) => {
           const next = new Map(prev)
           const existingRemote = next.get(peerUserId)
+
+          // If this is a secondary video track (e.g. screen share), handle separately
+          if (track.kind === "video" && existingRemote?.stream.getVideoTracks().length && existingRemote.stream.getVideoTracks()[0].id !== track.id) {
+            console.log(`[WebRTC] Identified secondary video stream (screen share) from ${peerUserId}`)
+            setRemoteScreenStreams((sPrev) => {
+              const sNext = new Map(sPrev)
+              sNext.set(peerUserId, incomingStream || new MediaStream([track]))
+              return sNext
+            })
+            return next
+          }
 
           let stream: MediaStream
           if (incomingStream) {
@@ -156,11 +180,16 @@ export function useWebRTCStream({
         })
       }
 
-      // 5. Connection State Lifecycle
+      // 6. Connection State Lifecycle
       pc.onconnectionstatechange = () => {
         console.log(`[WebRTC] Connection state with ${peerUserId} -> ${pc.connectionState}`)
         if (pc.connectionState === "failed" || pc.connectionState === "closed") {
           setRemoteStreams((prev) => {
+            const next = new Map(prev)
+            next.delete(peerUserId)
+            return next
+          })
+          setRemoteScreenStreams((prev) => {
             const next = new Map(prev)
             next.delete(peerUserId)
             return next
@@ -267,16 +296,51 @@ export function useWebRTCStream({
       next.delete(leftUserId)
       return next
     })
+    setRemoteScreenStreams((prev) => {
+      const next = new Map(prev)
+      next.delete(leftUserId)
+      return next
+    })
   }, [])
 
-  // Sync local tracks dynamically if media stream updates
+  // Start Screen Sharing as a dedicated track (Preserving Camera!)
+  const addScreenTrack = useCallback(async (screenTrack: MediaStreamTrack, screenStream: MediaStream) => {
+    localScreenStreamRef.current = screenStream
+    for (const [peerUserId, peer] of peersRef.current.entries()) {
+      try {
+        const sender = peer.pc.addTrack(screenTrack, screenStream)
+        peer.screenSender = sender
+        console.log(`[WebRTC] Added screen track to peer ${peerUserId}`)
+      } catch (err) {
+        console.error(`[WebRTC] Error adding screen track to peer ${peerUserId}:`, err)
+      }
+    }
+  }, [])
+
+  // Stop Screen Sharing track
+  const removeScreenTrack = useCallback(async () => {
+    localScreenStreamRef.current = null
+    for (const [peerUserId, peer] of peersRef.current.entries()) {
+      if (peer.screenSender) {
+        try {
+          peer.pc.removeTrack(peer.screenSender)
+          peer.screenSender = undefined
+          console.log(`[WebRTC] Removed screen track from peer ${peerUserId}`)
+        } catch (err) {
+          console.error(`[WebRTC] Error removing screen track from peer ${peerUserId}:`, err)
+        }
+      }
+    }
+  }, [])
+
+  // Sync local camera/mic tracks dynamically if media stream updates
   useEffect(() => {
     if (!localStream) return
 
     peersRef.current.forEach((peer) => {
       const senders = peer.pc.getSenders()
       localStream.getTracks().forEach((track) => {
-        const sender = senders.find((s) => s.track?.kind === track.kind)
+        const sender = senders.find((s) => s.track?.kind === track.kind && s !== peer.screenSender)
         if (sender) {
           sender.replaceTrack(track)
         } else {
@@ -286,26 +350,13 @@ export function useWebRTCStream({
     })
   }, [localStream])
 
-  // Explicitly replace video track (e.g. for screen sharing or camera toggle)
-  const replaceVideoTrack = useCallback(async (newTrack: MediaStreamTrack | null) => {
-    for (const peer of peersRef.current.values()) {
-      const videoSender = peer.pc.getSenders().find((s) => s.track?.kind === "video")
-      if (videoSender) {
-        try {
-          await videoSender.replaceTrack(newTrack)
-          console.log(`[WebRTC] Replaced video track for peer (newTrack: ${newTrack?.label || "null"})`)
-        } catch (err) {
-          console.error("[WebRTC] Error replacing video track:", err)
-        }
-      }
-    }
-  }, [])
-
   return {
     remoteStreams,
+    remoteScreenStreams,
     initiateCall,
     handleReceiveSignal,
     handlePeerLeft,
-    replaceVideoTrack,
+    addScreenTrack,
+    removeScreenTrack,
   }
 }

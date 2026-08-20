@@ -9,6 +9,8 @@ import { MeetingHeader } from "@/components/meeting/meeting-header"
 import { MeetingControls } from "@/components/meeting/meeting-controls"
 import { VideoGrid } from "@/components/meeting/video-grid"
 import { MeetingSidebar } from "@/components/meeting/meeting-sidebar"
+import { Whiteboard, type WhiteboardElement } from "@/components/meeting/whiteboard"
+import { MediasoupVideoTile } from "@/components/meeting/mediasoup-video-tile"
 import { useWebRTCStream } from "@/hooks/use-webrtc-stream"
 import { useSignalR, type SignalRParticipant, type SignalRMessage } from "@/hooks/use-signalr"
 import { fetchChatHistory } from "@/lib/meeting-api"
@@ -28,6 +30,12 @@ export default function MeetingPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<string>("chat")
   const [unreadMessages, setUnreadMessages] = useState(0)
+  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false)
+
+  // Whiteboard Real-Time State
+  const [incomingStroke, setIncomingStroke] = useState<WhiteboardElement | null>(null)
+  const [incomingWhiteboardHistory, setIncomingWhiteboardHistory] = useState<WhiteboardElement[] | null>(null)
+  const [isBoardCleared, setIsBoardCleared] = useState(false)
 
   // Identity state
   const [userId, setUserId] = useState<string>("")
@@ -42,7 +50,6 @@ export default function MeetingPage() {
   const [isInitializingMedia, setIsInitializingMedia] = useState(false)
 
   // Media stream references
-  const cameraStreamRef = useRef<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
 
   // Chat and Participants state
@@ -85,7 +92,6 @@ export default function MeetingPage() {
         })
 
         activeStream = stream
-        cameraStreamRef.current = stream
         setLocalStream(stream)
         setIsInitializingMedia(false)
         console.log("[MeetingPage] Local media stream successfully initialized")
@@ -110,8 +116,16 @@ export default function MeetingPage() {
     }
   }, [userId])
 
-  // 3. WebRTC Stream Engine Hook
-  const { remoteStreams, initiateCall, handleReceiveSignal, handlePeerLeft, replaceVideoTrack } = useWebRTCStream({
+  // 3. WebRTC Stream Engine Hook (Concurrent Camera + Dedicated Screen Share)
+  const {
+    remoteStreams,
+    remoteScreenStreams,
+    initiateCall,
+    handleReceiveSignal,
+    handlePeerLeft,
+    addScreenTrack,
+    removeScreenTrack,
+  } = useWebRTCStream({
     meetingId,
     userId,
     username,
@@ -181,11 +195,35 @@ export default function MeetingPage() {
     [participants, userId, isScreenSharing],
   )
 
+  // Whiteboard SignalR Handlers
+  const handleReceiveWhiteboardStroke = useCallback((strokeData: any) => {
+    setIncomingStroke(strokeData)
+  }, [])
+
+  const handleWhiteboardCleared = useCallback(() => {
+    setIsBoardCleared(true)
+    setTimeout(() => setIsBoardCleared(false), 200)
+    toast.info("Whiteboard was cleared by a participant")
+  }, [])
+
+  const handleWhiteboardToggled = useCallback((isOpen: boolean) => {
+    setIsWhiteboardOpen(isOpen)
+    toast.info(isOpen ? "Whiteboard mode opened" : "Whiteboard mode closed")
+  }, [])
+
+  const handleReceiveWhiteboardHistory = useCallback((history: any[]) => {
+    setIncomingWhiteboardHistory(history)
+  }, [])
+
   const {
     isConnected: isSignalRConnected,
     activeScreenSharerId,
     startScreenShare,
     stopScreenShare,
+    sendWhiteboardStroke,
+    clearWhiteboard,
+    toggleWhiteboardMode: signalRToggleWhiteboard,
+    requestWhiteboardHistory,
     sendMessage,
     sendSignal,
     raiseHand,
@@ -201,6 +239,10 @@ export default function MeetingPage() {
     onMediaStatusChanged: handleMediaStatusChanged,
     onScreenShareChanged: handleScreenShareChanged,
     onReceiveSignal: handleReceiveSignal,
+    onReceiveWhiteboardStroke: handleReceiveWhiteboardStroke,
+    onWhiteboardCleared: handleWhiteboardCleared,
+    onWhiteboardToggled: handleWhiteboardToggled,
+    onReceiveWhiteboardHistory: handleReceiveWhiteboardHistory,
   })
 
   // Load chat history from Supabase / .NET API on initial join
@@ -261,19 +303,11 @@ export default function MeetingPage() {
       screenStreamRef.current = null
     }
 
-    const cameraTrack = cameraStreamRef.current?.getVideoTracks()[0] || null
-    if (cameraTrack) {
-      await replaceVideoTrack(cameraTrack)
-      if (localStream) {
-        const audioTrack = localStream.getAudioTracks()[0]
-        setLocalStream(new MediaStream([audioTrack, cameraTrack].filter(Boolean)))
-      }
-    }
-
+    await removeScreenTrack()
     setIsScreenSharing(false)
     await stopScreenShare()
     toast.info("Screen sharing ended")
-  }, [localStream, replaceVideoTrack, stopScreenShare])
+  }, [removeScreenTrack, stopScreenShare])
 
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
@@ -303,12 +337,7 @@ export default function MeetingPage() {
           stopLocalScreenShare()
         }
 
-        await replaceVideoTrack(screenTrack)
-        if (localStream) {
-          const audioTrack = localStream.getAudioTracks()[0]
-          setLocalStream(new MediaStream([audioTrack, screenTrack].filter(Boolean)))
-        }
-
+        await addScreenTrack(screenTrack, screenStream)
         setIsScreenSharing(true)
         toast.success("Screen sharing started")
       } catch (err: any) {
@@ -317,6 +346,15 @@ export default function MeetingPage() {
           console.error("Screen share error:", err)
         }
       }
+    }
+  }
+
+  const toggleWhiteboard = () => {
+    const nextState = !isWhiteboardOpen
+    setIsWhiteboardOpen(nextState)
+    signalRToggleWhiteboard(nextState)
+    if (nextState) {
+      requestWhiteboardHistory()
     }
   }
 
@@ -382,6 +420,21 @@ export default function MeetingPage() {
 
   const isOtherSharing = !!activeScreenSharerId && activeScreenSharerId !== userId
   const otherSharerName = participants.find((p) => p.userId === activeScreenSharerId)?.username
+  const remoteList = Array.from(remoteStreams.values())
+
+  // Compute active screen share stream (Spotlight Mode)
+  let activeScreenStream: MediaStream | null = null
+  let activeScreenSharerName: string | undefined = undefined
+
+  if (isScreenSharing && screenStreamRef.current) {
+    activeScreenStream = screenStreamRef.current
+    activeScreenSharerName = `${username} (You)`
+  } else if (activeScreenSharerId && activeScreenSharerId !== userId) {
+    const remoteScreen = remoteScreenStreams.get(activeScreenSharerId)
+    const remoteCam = remoteStreams.get(activeScreenSharerId)
+    activeScreenStream = remoteScreen || (remoteCam?.stream || null)
+    activeScreenSharerName = otherSharerName || "Participant"
+  }
 
   return (
     <div ref={containerRef} className="flex flex-col h-screen bg-background text-foreground overflow-hidden select-none">
@@ -396,17 +449,70 @@ export default function MeetingPage() {
 
       {/* 2. Main Content Area */}
       <div className="flex-1 flex relative overflow-hidden bg-muted/20">
-        {/* Video Grid */}
-        <VideoGrid
-          isSidebarOpen={isSidebarOpen}
-          username={username}
-          localStream={localStream}
-          isAudioEnabled={isAudioEnabled}
-          isVideoEnabled={isVideoEnabled}
-          isHandRaised={isHandRaised}
-          remoteStreams={remoteStreams}
-          participants={participants}
-        />
+        {/* Main Stage: Whiteboard OR Video Grid (with Spotlight Presentation) */}
+        {isWhiteboardOpen ? (
+          <div className="flex-1 flex flex-col relative overflow-hidden">
+            <div className="flex-1 relative">
+              <Whiteboard
+                currentUserId={userId}
+                currentUsername={username}
+                onSendStroke={(stroke) => sendWhiteboardStroke(stroke)}
+                onClearBoard={() => clearWhiteboard()}
+                onClose={() => toggleWhiteboard()}
+                incomingStroke={incomingStroke}
+                incomingHistory={incomingWhiteboardHistory}
+                isBoardCleared={isBoardCleared}
+              />
+            </div>
+
+            {/* Bottom Floating Video Filmstrip */}
+            <div className="h-28 sm:h-32 bg-background/80 backdrop-blur-md border-t border-border flex items-center gap-3 px-4 overflow-x-auto z-10 flex-shrink-0">
+              <div className="w-40 sm:w-44 h-full py-2 flex-shrink-0">
+                <MediasoupVideoTile
+                  stream={localStream}
+                  username={username}
+                  isLocal={true}
+                  isAudioEnabled={isAudioEnabled}
+                  isVideoEnabled={isVideoEnabled}
+                  isHandRaised={isHandRaised}
+                  className="h-full w-full rounded-xl"
+                />
+              </div>
+
+              {remoteList.map((remote) => {
+                const participantInfo = participants.find((p) => p.userId === remote.userId)
+                return (
+                  <div key={remote.userId} className="w-40 sm:w-44 h-full py-2 flex-shrink-0">
+                    <MediasoupVideoTile
+                      stream={remote.stream}
+                      username={remote.username || participantInfo?.username || remote.userId}
+                      isLocal={false}
+                      isAudioEnabled={remote.isAudioEnabled}
+                      isVideoEnabled={remote.isVideoEnabled}
+                      isHandRaised={participantInfo?.isHandRaised}
+                      className="h-full w-full rounded-xl"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ) : (
+          <VideoGrid
+            isSidebarOpen={isSidebarOpen}
+            username={username}
+            localStream={localStream}
+            isAudioEnabled={isAudioEnabled}
+            isVideoEnabled={isVideoEnabled}
+            isHandRaised={isHandRaised}
+            remoteStreams={remoteStreams}
+            participants={participants}
+            activeScreenStream={activeScreenStream}
+            activeScreenSharerId={activeScreenSharerId}
+            activeScreenSharerName={activeScreenSharerName}
+            currentUserId={userId}
+          />
+        )}
 
         {/* Slide-out Sidebar */}
         {isSidebarOpen && (
@@ -442,6 +548,8 @@ export default function MeetingPage() {
         toggleScreenShare={toggleScreenShare}
         isScreenShareDisabled={isOtherSharing}
         screenShareDisabledReason={isOtherSharing ? `${otherSharerName || "Another participant"} is currently sharing their screen` : undefined}
+        isWhiteboardOpen={isWhiteboardOpen}
+        toggleWhiteboard={toggleWhiteboard}
         isSidebarOpen={isSidebarOpen}
         activeTab={activeTab}
         toggleSidebar={toggleSidebar}
