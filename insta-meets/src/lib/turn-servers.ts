@@ -13,28 +13,29 @@ const PUBLIC_STUN_SERVERS: RTCIceServer[] = [
 ]
 
 /**
- * Returns ICE servers for WebRTC peer connections.
- * Defaults to reliable public STUN servers without usage limits.
- * If custom TURN environment variables are provided, they will be included.
+ * Fetches dynamic ICE/TURN servers from the Next.js API route (/api/turn)
+ * which communicates with Xirsys or returns public STUN servers.
  */
 export async function fetchTurnServers(): Promise<RTCIceServer[]> {
-  // Check if custom TURN credentials are provided via environment variables
-  const customTurnUrl = process.env.NEXT_PUBLIC_TURN_URL || process.env.TURN_URL
-  const customTurnUser = process.env.NEXT_PUBLIC_TURN_USERNAME || process.env.TURN_USERNAME
-  const customTurnCred = process.env.NEXT_PUBLIC_TURN_CREDENTIAL || process.env.TURN_CREDENTIAL
+  try {
+    const res = await fetch("/api/turn", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+    })
 
-  if (customTurnUrl && customTurnUser && customTurnCred) {
-    console.log("[TurnServers] Using custom configured TURN server alongside public STUN")
-    return [
-      {
-        urls: customTurnUrl,
-        username: customTurnUser,
-        credential: customTurnCred,
-      },
-      ...PUBLIC_STUN_SERVERS,
-    ]
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data?.iceServers) && data.iceServers.length > 0) {
+        console.log(`[TurnServers] Successfully loaded ${data.iceServers.length} ICE/TURN servers from /api/turn`)
+        return data.iceServers
+      }
+    }
+  } catch (err: any) {
+    console.warn("[TurnServers] Could not fetch from /api/turn, using fallback STUN:", err.message)
   }
 
+  // Fallback to client-side public STUN
   console.log("[TurnServers] Using high-availability public STUN servers")
   return PUBLIC_STUN_SERVERS
 }
@@ -45,4 +46,5 @@ export async function fetchTurnServers(): Promise<RTCIceServer[]> {
 export function getFallbackServers(): RTCIceServer[] {
   return PUBLIC_STUN_SERVERS
 }
+
 
