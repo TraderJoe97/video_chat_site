@@ -10,18 +10,25 @@ const PUBLIC_STUN_SERVERS: RTCIceServer[] = [
   { urls: "stun:global.stun.twilio.com:3478" },
 ]
 
+export const dynamic = "force-dynamic"
+
 export async function GET() {
-  const xirsysIdent = process.env.XIRSYS_IDENT || process.env.XIRSYS_USER
-  const xirsysSecret = process.env.XIRSYS_SECRET || process.env.XIRSYS_API_KEY
-  const xirsysChannel = process.env.XIRSYS_CHANNEL || "default"
+  const rawIdent = process.env.XIRSYS_IDENT || process.env.XIRSYS_USER || ""
+  const rawSecret = process.env.XIRSYS_SECRET || process.env.XIRSYS_API_KEY || ""
+  const rawChannel = process.env.XIRSYS_CHANNEL || "default"
+
+  const xirsysIdent = rawIdent.trim()
+  const xirsysSecret = rawSecret.trim()
+  const xirsysChannel = rawChannel.trim()
 
   // 1. If Xirsys credentials exist, fetch dynamic TURN servers
   if (xirsysIdent && xirsysSecret) {
     try {
-      console.log(`[TurnAPI] Fetching dynamic TURN credentials from Xirsys for channel: ${xirsysChannel}`)
+      console.log(`[TurnAPI] Requesting dynamic TURN credentials from Xirsys for channel: ${xirsysChannel}`)
       const authHeader = "Basic " + Buffer.from(`${xirsysIdent}:${xirsysSecret}`).toString("base64")
       
-      const response = await fetch(`https://global.xirsys.net/_turn/${encodeURIComponent(xirsysChannel)}`, {
+      const endpoint = `https://global.xirsys.net/_turn/${encodeURIComponent(xirsysChannel)}`
+      const response = await fetch(endpoint, {
         method: "PUT",
         headers: {
           Authorization: authHeader,
@@ -36,20 +43,21 @@ export async function GET() {
         if (data?.s === "ok" && data?.v?.iceServers) {
           const rawServers = data.v.iceServers
           const iceServersArray: RTCIceServer[] = Array.isArray(rawServers) ? rawServers : [rawServers]
-          console.log(`[TurnAPI] Successfully fetched dynamic Xirsys TURN servers`)
+          console.log(`[TurnAPI] Successfully fetched dynamic Xirsys TURN servers (${iceServersArray.length} entries)`)
           return NextResponse.json({ iceServers: [...iceServersArray, ...PUBLIC_STUN_SERVERS] })
         }
+      } else {
+        console.warn(`[TurnAPI] Xirsys API returned status ${response.status}: ${response.statusText}`)
       }
-      console.warn(`[TurnAPI] Xirsys API returned unexpected status: ${response.status}`)
     } catch (err: any) {
       console.error("[TurnAPI] Error requesting Xirsys dynamic TURN:", err.message)
     }
   }
 
   // 2. Static custom TURN credentials fallback
-  const customTurnUrl = process.env.TURN_URL || process.env.NEXT_PUBLIC_TURN_URL
-  const customTurnUser = process.env.TURN_USERNAME || process.env.NEXT_PUBLIC_TURN_USERNAME
-  const customTurnCred = process.env.TURN_CREDENTIAL || process.env.NEXT_PUBLIC_TURN_CREDENTIAL
+  const customTurnUrl = (process.env.TURN_URL || process.env.NEXT_PUBLIC_TURN_URL || "").trim()
+  const customTurnUser = (process.env.TURN_USERNAME || process.env.NEXT_PUBLIC_TURN_USERNAME || "").trim()
+  const customTurnCred = (process.env.TURN_CREDENTIAL || process.env.NEXT_PUBLIC_TURN_CREDENTIAL || "").trim()
 
   if (customTurnUrl && customTurnUser && customTurnCred) {
     return NextResponse.json({
