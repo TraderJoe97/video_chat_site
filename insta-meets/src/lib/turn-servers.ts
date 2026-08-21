@@ -1,74 +1,48 @@
 /**
- * Fetches TURN server credentials from Metered.ca
- * @returns Promise<RTCIceServer[]> Array of ICE servers
+ * Robust, high-availability public STUN servers (Google, Cloudflare, Twilio)
+ * These servers perform NAT discovery with zero bandwidth caps and 100% free uptime.
+ */
+const PUBLIC_STUN_SERVERS: RTCIceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun2.l.google.com:19302" },
+  { urls: "stun:stun3.l.google.com:19302" },
+  { urls: "stun:stun4.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: "stun:global.stun.twilio.com:3478" },
+]
+
+/**
+ * Returns ICE servers for WebRTC peer connections.
+ * Defaults to reliable public STUN servers without usage limits.
+ * If custom TURN environment variables are provided, they will be included.
  */
 export async function fetchTurnServers(): Promise<RTCIceServer[]> {
-  console.log("[TurnServers] Attempting to fetch TURN servers from Metered")
+  // Check if custom TURN credentials are provided via environment variables
+  const customTurnUrl = process.env.NEXT_PUBLIC_TURN_URL || process.env.TURN_URL
+  const customTurnUser = process.env.NEXT_PUBLIC_TURN_USERNAME || process.env.TURN_USERNAME
+  const customTurnCred = process.env.NEXT_PUBLIC_TURN_CREDENTIAL || process.env.TURN_CREDENTIAL
 
-  if (!process.env.METERED_API_KEY) {
-    console.warn("[TurnServers] No Metered API key found, using fallback servers")
-    return getFallbackServers()
-  }
-
-  try {
-    const response = await fetch(
-      `https://insta-meets.metered.live/api/v1/turn/credentials?apiKey=${process.env.METERED_API_KEY}`,
+  if (customTurnUrl && customTurnUser && customTurnCred) {
+    console.log("[TurnServers] Using custom configured TURN server alongside public STUN")
+    return [
       {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        urls: customTurnUrl,
+        username: customTurnUser,
+        credential: customTurnCred,
       },
-    )
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch TURN servers: ${response.status} ${response.statusText}`)
-    }
-
-    const turnServers = await response.json()
-    console.log(`[TurnServers] Successfully fetched ${turnServers.length} TURN servers from Metered`)
-
-    // Add Google STUN servers as fallback
-    const servers = [
-      ...turnServers,
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun2.l.google.com:19302" },
+      ...PUBLIC_STUN_SERVERS,
     ]
-
-    return servers
-  } catch (error) {
-    console.error("[TurnServers] Error fetching TURN servers:", error)
-    return getFallbackServers()
   }
+
+  console.log("[TurnServers] Using high-availability public STUN servers")
+  return PUBLIC_STUN_SERVERS
 }
 
 /**
- * Returns fallback ICE servers when Metered servers can't be fetched
+ * Returns fallback ICE servers
  */
-function getFallbackServers(): RTCIceServer[] {
-  console.log("[TurnServers] Using fallback ICE servers")
-  return [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
-    { urls: "stun:stun3.l.google.com:19302" },
-    { urls: "stun:stun4.l.google.com:19302" },
-    { urls: "stun:global.stun.twilio.com:3478" },
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443?transport=tcp",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-  ]
+export function getFallbackServers(): RTCIceServer[] {
+  return PUBLIC_STUN_SERVERS
 }
+
